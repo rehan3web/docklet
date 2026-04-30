@@ -1030,16 +1030,50 @@ export default function StoragePage() {
 
           {/* Connected: split layout */}
           {connected && activeView === "files" && (
-            <div className="flex gap-4 h-[calc(100vh-260px)] min-h-[500px]">
-              {/* Bucket list */}
-              <div className="w-56 shrink-0 flex flex-col gap-3">
-                <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row gap-3 md:h-[calc(100vh-260px)] md:min-h-[500px]">
+
+              {/* ── Bucket list ── */}
+              <div className="md:w-56 md:shrink-0 md:flex md:flex-col md:gap-3">
+
+                {/* Header row — both breakpoints */}
+                <div className="flex items-center justify-between mb-2 md:mb-0">
                   <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Buckets</span>
                   <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" title="New bucket" onClick={() => setShowCreateBucket(true)}>
                     <Plus className="w-3.5 h-3.5" />
                   </Button>
                 </div>
-                <div className="flex-1 overflow-y-auto space-y-0.5">
+
+                {/* ── Mobile: horizontal scrollable chip row ── */}
+                <div className="flex md:hidden gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                  {bucketsLoading ? (
+                    Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-8 w-24 shrink-0 rounded-full bg-muted" />)
+                  ) : buckets.length === 0 ? (
+                    <button onClick={() => setShowCreateBucket(true)} className="shrink-0 text-xs text-primary underline underline-offset-2">
+                      Create a bucket
+                    </button>
+                  ) : buckets.map(b => (
+                    <button
+                      key={b.name}
+                      onClick={() => { setSelectedBucket(b.name); setSelected(new Set()); setSearch(""); }}
+                      className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border transition-all whitespace-nowrap ${
+                        selectedBucket === b.name
+                          ? "bg-muted text-foreground border-border font-medium"
+                          : "text-muted-foreground border-transparent hover:border-border hover:text-foreground"
+                      }`}
+                    >
+                      <FolderOpen className="w-3 h-3 shrink-0" />
+                      {b.name}
+                      {selectedBucket === b.name && !policyLoading && selectedBucketIsPublic !== null && (
+                        <span className="text-[9px] font-medium" style={selectedBucketIsPublic ? { color: "#16a34a" } : { color: "#71717a" }}>
+                          · {selectedBucketIsPublic ? "public" : "private"}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* ── Desktop: vertical list ── */}
+                <div className="hidden md:block flex-1 overflow-y-auto space-y-0.5">
                   {bucketsLoading ? (
                     Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full rounded-lg bg-muted" />)
                   ) : buckets.length === 0 ? (
@@ -1074,8 +1108,8 @@ export default function StoragePage() {
                 </div>
               </div>
 
-              {/* File Explorer */}
-              <div className="flex-1 flex flex-col border border-border rounded-xl overflow-hidden bg-background">
+              {/* ── File Explorer ── */}
+              <div className="flex-1 flex flex-col border border-border rounded-xl overflow-hidden bg-background min-h-[320px]">
                 {!selectedBucket ? (
                   <div className="flex-1 flex items-center justify-center">
                     <div className="text-center">
@@ -1086,24 +1120,16 @@ export default function StoragePage() {
                 ) : (
                   <>
                     {/* Toolbar */}
-                    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-muted/20">
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mr-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2 border-b border-border bg-muted/20">
+                      {/* Breadcrumb */}
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Database className="w-3.5 h-3.5" />
                         <ChevronRight className="w-3 h-3" />
                         <span className="text-foreground font-medium">{selectedBucket}</span>
                       </div>
-                      <div className="flex-1 relative max-w-xs">
-                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          placeholder="Filter files…"
-                          value={search}
-                          onChange={e => setSearch(e.target.value)}
-                          className="h-7 text-xs pl-8 pr-7 bg-background"
-                        />
-                        {search && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setSearch("")}><X className="w-3 h-3" /></button>}
-                      </div>
+
+                      {/* Buttons — push right on desktop, stay inline on mobile */}
                       <div className="flex items-center gap-1 ml-auto">
-                        {/* Policy toggle */}
                         {selectedBucketIsPublic !== null && !policyLoading && (
                           <button onClick={handleTogglePolicy} title={selectedBucketIsPublic ? "Bucket is public — click to make private" : "Bucket is private — click to make public"}
                             className="flex items-center gap-1 h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-all border border-transparent hover:border-border">
@@ -1113,12 +1139,24 @@ export default function StoragePage() {
                         )}
                         {selected.size > 0 && (
                           <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteFiles(Array.from(selected))}>
-                            <Trash2 className="w-3.5 h-3.5 mr-1" />Delete ({selected.size})
+                            <Trash2 className="w-3.5 h-3.5 mr-1" /><span className="hidden sm:inline">Delete</span> ({selected.size})
                           </Button>
                         )}
                         <Button size="sm" className="h-7 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={() => setShowUpload(true)}>
-                          <Upload className="w-3.5 h-3.5 mr-1" />Upload
+                          <Upload className="w-3.5 h-3.5 md:mr-1" /><span className="hidden md:inline">Upload</span>
                         </Button>
+                      </div>
+
+                      {/* Search — full width second row on mobile */}
+                      <div className="relative w-full md:w-auto md:flex-1 md:max-w-xs order-last md:order-none">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          placeholder="Filter files…"
+                          value={search}
+                          onChange={e => setSearch(e.target.value)}
+                          className="h-7 text-xs pl-8 pr-7 bg-background w-full"
+                        />
+                        {search && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setSearch("")}><X className="w-3 h-3" /></button>}
                       </div>
                     </div>
 
