@@ -17,6 +17,7 @@ import SshPage from "@/pages/ssh";
 import DockerPage from "@/pages/docker";
 import DeployPage from "@/pages/deploy";
 import ProxyPage from "@/pages/proxy";
+import SchedulerPage from "@/pages/scheduler";
 import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import { ThemeProvider } from "@/hooks/use-theme";
@@ -64,6 +65,7 @@ function Router() {
       <Route path="/docker">{() => <PrivateRoute component={DockerPage} />}</Route>
       <Route path="/deploy">{() => <PrivateRoute component={DeployPage} />}</Route>
       <Route path="/proxy">{() => <PrivateRoute component={ProxyPage} />}</Route>
+      <Route path="/scheduler">{() => <PrivateRoute component={SchedulerPage} />}</Route>
       <Route path="/login">{() => <PublicRoute component={LoginPage} />}</Route>
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route component={NotFound} />

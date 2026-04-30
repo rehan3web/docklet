@@ -596,3 +596,59 @@ export async function deleteProxyDomain(id: number): Promise<{ ok: boolean }> {
 export async function reloadProxy(): Promise<{ ok: boolean }> {
   return apiFetch("/proxy/reload", { method: "POST" });
 }
+
+// ── Scheduler ─────────────────────────────────────────────────────────────────
+
+export type ScheduledTask = {
+  id: number;
+  name: string;
+  cron_expr: string;
+  timezone: string | null;
+  script: string;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+};
+
+export type TaskRun = {
+  id: number;
+  task_id: number;
+  started_at: number;
+  finished_at: number | null;
+  status: "running" | "success" | "failed";
+  output: string;
+  exit_code: number | null;
+};
+
+export function useGetScheduledTasks() {
+  return useQuery({
+    queryKey: ["scheduled-tasks"],
+    queryFn: () => apiFetch<{ tasks: ScheduledTask[] }>("/scheduler/tasks"),
+    refetchInterval: 10000,
+  });
+}
+
+export async function createScheduledTask(data: { name: string; cron_expr: string; timezone?: string; script: string; enabled?: boolean }): Promise<{ task: ScheduledTask }> {
+  return apiFetch("/scheduler/tasks", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function updateScheduledTask(id: number, data: Partial<{ name: string; cron_expr: string; timezone: string; script: string; enabled: boolean }>): Promise<{ task: ScheduledTask }> {
+  return apiFetch(`/scheduler/tasks/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export async function deleteScheduledTask(id: number): Promise<{ ok: boolean }> {
+  return apiFetch(`/scheduler/tasks/${id}`, { method: "DELETE" });
+}
+
+export async function runScheduledTask(id: number): Promise<{ runId: number }> {
+  return apiFetch(`/scheduler/tasks/${id}/run`, { method: "POST" });
+}
+
+export function useGetTaskRuns(taskId: number | null) {
+  return useQuery({
+    queryKey: ["task-runs", taskId],
+    queryFn: () => apiFetch<{ runs: TaskRun[] }>(`/scheduler/tasks/${taskId}/runs`),
+    enabled: taskId !== null,
+    refetchInterval: 3000,
+  });
+}
