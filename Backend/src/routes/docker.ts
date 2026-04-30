@@ -1,6 +1,7 @@
 import express from 'express';
 import Docker from 'dockerode';
 import fs from 'fs';
+import { Socket } from 'socket.io';
 import { authenticateToken } from '../middleware/auth';
 
 const router = express.Router();
@@ -128,6 +129,53 @@ router.delete('/containers/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// ── Container logs ────────────────────────────────────────────────────────────
+router.get('/containers/:id/logs', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        const tail = parseInt(String(req.query.tail || '300'), 10);
+        const container = getDocker().getContainer(String(req.params.id));
+        const buf: Buffer[] = [];
+        const stream = await container.logs({
+            stdout: true, stderr: true, timestamps: true,
+            tail: isNaN(tail) ? 300 : tail,
+        });
+        // dockerode returns a Buffer directly when not multiplexed; handle both
+        if (Buffer.isBuffer(stream)) {
+            res.json({ logs: stream.toString('utf8') });
+        } else {
+            (stream as any).on('data', (chunk: Buffer) => buf.push(chunk));
+            (stream as any).on('end', () => {
+                const raw = Buffer.concat(buf).toString('utf8');
+                // Strip 8-byte dockerode multiplexing header from each line
+                const lines = raw.split('\n').map(l => l.length > 8 ? l.slice(8) : l).join('\n');
+                res.json({ logs: lines });
+            });
+            (stream as any).on('error', (err: any) => res.status(500).json({ message: err.message }));
+        }
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ── Container inspect (network + mounts) ─────────────────────────────────────
+router.get('/containers/:id/inspect', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        const container = getDocker().getContainer(String(req.params.id));
+        const info = await container.inspect();
+        res.json({
+            networks: info.NetworkSettings?.Networks ?? {},
+            mounts: info.Mounts ?? [],
+            hostname: (info.Config as any)?.Hostname ?? null,
+        });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 router.post('/bulk/:action', authenticateToken, async (req, res) => {
     const avail = dockerAvailable();
     if (!avail.ok) return res.status(503).json({ message: avail.reason });
@@ -155,3 +203,85 @@ router.post('/bulk/:action', authenticateToken, async (req, res) => {
 });
 
 export default router;
+
+// ── Docker container exec (terminal) socket handler ───────────────────────────
+interface ExecSession { stream: any }
+const execSessions = new Map<string, ExecSession>();
+
+export function registerDockerExecSocketHandlers(socket: Socket) {
+    const sid = socket.id;
+
+    function closeExec() {
+        const s = execSessions.get(sid);
+        if (s) {
+            try { s.stream.end(); } catch { /* ignore */ }
+            execSessions.delete(sid);
+        }
+    }
+
+    socket.on('docker:exec:start', async ({ containerId, rows, cols }: { containerId: string; rows?: number; cols?: number }) => {
+        closeExec();
+        if (!dockerAvailable().ok) {
+            socket.emit('docker:exec:error', { message: 'Docker is not available' });
+            return;
+        }
+        try {
+            const container = getDocker().getContainer(containerId);
+            // Try bash first, fall back to sh
+            const shells = ['/bin/bash', '/bin/sh', 'sh'];
+            let execStream: any = null;
+
+            for (const shell of shells) {
+                try {
+                    const exec = await container.exec({
+                        Cmd: [shell],
+                        AttachStdin: true,
+                        AttachStdout: true,
+                        AttachStderr: true,
+                        Tty: true,
+                        Env: ['TERM=xterm-256color'],
+                    });
+                    execStream = await exec.start({ hijack: true, stdin: true });
+                    break;
+                } catch { /* try next shell */ }
+            }
+
+            if (!execStream) {
+                socket.emit('docker:exec:error', { message: 'No shell available in container' });
+                return;
+            }
+
+            execSessions.set(sid, { stream: execStream });
+            socket.emit('docker:exec:ready', {});
+
+            execStream.on('data', (chunk: Buffer) => {
+                socket.emit('docker:exec:data', chunk.toString('utf8'));
+            });
+            execStream.on('end', () => {
+                socket.emit('docker:exec:exit', {});
+                execSessions.delete(sid);
+            });
+            execStream.on('error', (err: any) => {
+                socket.emit('docker:exec:error', { message: err.message });
+                execSessions.delete(sid);
+            });
+        } catch (err: any) {
+            socket.emit('docker:exec:error', { message: err.message });
+        }
+    });
+
+    socket.on('docker:exec:input', (data: string) => {
+        const s = execSessions.get(sid);
+        if (s) {
+            try { s.stream.write(data); } catch { /* ignore */ }
+        }
+    });
+
+    socket.on('docker:exec:resize', ({ rows, cols }: { rows: number; cols: number }) => {
+        // Resize is handled by the exec's resize method if accessible
+    });
+
+    socket.on('docker:exec:stop', closeExec);
+
+    socket.on('disconnect', closeExec);
+}

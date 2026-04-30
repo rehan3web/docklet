@@ -15,6 +15,7 @@ import deployRoutes from './routes/deploy';
 import proxyRoutes from './routes/proxy';
 import schedulerRoutes from './routes/scheduler';
 import { registerSshSocketHandlers } from './routes/ssh';
+import { registerDockerExecSocketHandlers } from './routes/docker';
 import { setIo } from './lib/socket';
 import { initScheduler } from './lib/schedulerService';
 
@@ -83,6 +84,7 @@ io.on('connection', (socket) => {
     console.log(`Client connected: ${socket.id} (user=${userId})`);
 
     registerSshSocketHandlers(socket);
+    registerDockerExecSocketHandlers(socket);
 
     socket.on('subscribe-table', (tableName) => {
         if (typeof tableName === 'string' && /^[a-zA-Z0-9_.-]+$/.test(tableName)) {

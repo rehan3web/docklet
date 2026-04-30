@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2, MoreHorizontal, FileText, Network, HardDrive, Terminal, X } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,12 +7,355 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { useTheme } from "@/hooks/use-theme";
-import { useGetDockerStatus, useGetDockerContainers, dockerStart, dockerStop, dockerRestart, dockerRemove, dockerBulk } from "@/api/client";
+import {
+  useGetDockerStatus, useGetDockerContainers,
+  dockerStart, dockerStop, dockerRestart, dockerRemove, dockerBulk,
+  dockerLogs, dockerInspect,
+  type DockerContainer,
+} from "@/api/client";
 import { useQueryClient } from "@tanstack/react-query";
+import { getSocket } from "@/api/socket";
 
+// ── strip ANSI escape sequences ────────────────────────────────────────────────
+function stripAnsi(str: string): string {
+  return str.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/\r/g, "");
+}
+
+// ── Logs Dialog ───────────────────────────────────────────────────────────────
+function LogsDialog({ container, open, onClose }: { container: DockerContainer; open: boolean; onClose: () => void }) {
+  const [logs, setLogs] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const logRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    setLogs("");
+    dockerLogs(container.id).then(r => {
+      setLogs(r.logs || "(no logs)");
+    }).catch(err => {
+      setLogs(`Error: ${err.message}`);
+    }).finally(() => setLoading(false));
+  }, [open, container.id]);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [logs]);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-[760px] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="p-5 pb-3 border-b border-border">
+          <DialogTitle className="text-sm font-medium flex items-center gap-2">
+            <FileText className="w-4 h-4 text-muted-foreground" />
+            Logs — {container.names[0] || container.shortId}
+          </DialogTitle>
+          <DialogDescription className="text-xs">Last 300 lines (stdout + stderr)</DialogDescription>
+        </DialogHeader>
+        <div className="h-[480px] overflow-hidden bg-[#0d0d0d]">
+          {loading ? (
+            <div className="h-full flex items-center justify-center gap-2 text-muted-foreground text-xs">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading logs…
+            </div>
+          ) : (
+            <pre ref={logRef} className="font-mono text-[11px] text-green-400 p-4 h-full overflow-y-auto whitespace-pre-wrap leading-relaxed">
+              {logs}
+            </pre>
+          )}
+        </div>
+        <div className="p-4 border-t border-border flex justify-end">
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Close</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Network Dialog ────────────────────────────────────────────────────────────
+function NetworkDialog({ container, open, onClose }: { container: DockerContainer; open: boolean; onClose: () => void }) {
+  const [data, setData] = useState<Record<string, any>>({});
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    dockerInspect(container.id).then(r => setData(r.networks || {})).catch(() => setData({})).finally(() => setLoading(false));
+  }, [open, container.id]);
+
+  const networks = Object.entries(data);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-[620px] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="p-5 pb-3 border-b border-border">
+          <DialogTitle className="text-sm font-medium flex items-center gap-2">
+            <Network className="w-4 h-4 text-muted-foreground" />
+            Network — {container.names[0] || container.shortId}
+          </DialogTitle>
+          <DialogDescription className="text-xs">Network configuration for this container</DialogDescription>
+        </DialogHeader>
+        <div className="h-[380px] overflow-y-auto p-4">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 text-muted-foreground text-xs py-8">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+            </div>
+          ) : networks.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-8">No network data available</p>
+          ) : (
+            <div className="space-y-4">
+              {networks.map(([name, net]) => (
+                <div key={name} className="rounded-lg border border-border overflow-hidden">
+                  <div className="px-4 py-2 bg-muted/40 border-b border-border">
+                    <span className="font-mono text-xs font-medium text-foreground">{name}</span>
+                  </div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {[
+                        ["IP Address", net.IPAddress],
+                        ["Gateway", net.Gateway],
+                        ["Subnet", net.IPPrefixLen ? `/${net.IPPrefixLen}` : "—"],
+                        ["MAC Address", net.MacAddress],
+                        ["Network ID", net.NetworkID?.slice(0, 16)],
+                        ["Endpoint ID", net.EndpointID?.slice(0, 16)],
+                      ].filter(([, v]) => v).map(([k, v]) => (
+                        <tr key={k} className="border-b border-border/50 last:border-0">
+                          <td className="px-4 py-2 text-muted-foreground w-32 shrink-0">{k}</td>
+                          <td className="px-4 py-2 font-mono text-foreground">{v}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="p-4 border-t border-border flex justify-end">
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Close</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Mounts Dialog ─────────────────────────────────────────────────────────────
+function MountsDialog({ container, open, onClose }: { container: DockerContainer; open: boolean; onClose: () => void }) {
+  const [mounts, setMounts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    dockerInspect(container.id).then(r => setMounts(r.mounts || [])).catch(() => setMounts([])).finally(() => setLoading(false));
+  }, [open, container.id]);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-[680px] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="p-5 pb-3 border-b border-border">
+          <DialogTitle className="text-sm font-medium flex items-center gap-2">
+            <HardDrive className="w-4 h-4 text-muted-foreground" />
+            Mounts — {container.names[0] || container.shortId}
+          </DialogTitle>
+          <DialogDescription className="text-xs">Volume and bind mounts for this container</DialogDescription>
+        </DialogHeader>
+        <div className="h-[380px] overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 text-muted-foreground text-xs py-8">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+            </div>
+          ) : mounts.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-8">No mounts configured</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Type</th>
+                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Source</th>
+                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Destination</th>
+                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Mode</th>
+                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">RW</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mounts.map((m, i) => (
+                  <tr key={i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-2.5 font-mono text-foreground">{m.Type}</td>
+                    <td className="px-4 py-2.5 font-mono text-muted-foreground truncate max-w-[160px]" title={m.Source}>{m.Source || m.Name || "—"}</td>
+                    <td className="px-4 py-2.5 font-mono text-foreground truncate max-w-[160px]" title={m.Destination}>{m.Destination}</td>
+                    <td className="px-4 py-2.5 font-mono text-muted-foreground">{m.Mode || "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <Badge variant="outline" className={`text-[10px] rounded-full px-2 py-0 font-mono ${m.RW ? "text-primary bg-primary/10 border-primary/20" : "text-muted-foreground bg-muted/40"}`}>
+                        {m.RW ? "rw" : "ro"}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="p-4 border-t border-border flex justify-end">
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Close</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Container Terminal Dialog ─────────────────────────────────────────────────
+function TerminalDialog({ container, open, onClose }: { container: DockerContainer; open: boolean; onClose: () => void }) {
+  const [lines, setLines] = useState<string[]>([]);
+  const [input, setInput] = useState("");
+  const [connected, setConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const socket = getSocket();
+
+  const appendOutput = useCallback((text: string) => {
+    const cleaned = stripAnsi(text);
+    setLines(prev => {
+      const all = (prev.join("") + cleaned).split("\n");
+      return all.slice(-500);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setLines([]);
+    setError(null);
+    setConnected(false);
+
+    socket.emit("docker:exec:start", { containerId: container.id, rows: 40, cols: 120 });
+
+    const onReady = () => { setConnected(true); inputRef.current?.focus(); };
+    const onData = (data: string) => appendOutput(data);
+    const onExit = () => { setConnected(false); appendOutput("\n[Process exited]"); };
+    const onError = ({ message }: { message: string }) => { setError(message); setConnected(false); };
+
+    socket.on("docker:exec:ready", onReady);
+    socket.on("docker:exec:data", onData);
+    socket.on("docker:exec:exit", onExit);
+    socket.on("docker:exec:error", onError);
+
+    return () => {
+      socket.emit("docker:exec:stop");
+      socket.off("docker:exec:ready", onReady);
+      socket.off("docker:exec:data", onData);
+      socket.off("docker:exec:exit", onExit);
+      socket.off("docker:exec:error", onError);
+    };
+  }, [open, container.id]);
+
+  useEffect(() => {
+    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  }, [lines]);
+
+  function sendInput(e: React.FormEvent) {
+    e.preventDefault();
+    if (!connected) return;
+    socket.emit("docker:exec:input", input + "\n");
+    setInput("");
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-[760px] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="p-4 pb-3 border-b border-border flex-row items-center justify-between">
+          <div>
+            <DialogTitle className="text-sm font-medium flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-muted-foreground" />
+              Terminal — {container.names[0] || container.shortId}
+            </DialogTitle>
+            <DialogDescription className="text-xs mt-0.5">
+              {connected ? "Connected — type commands and press Enter" : error ? `Error: ${error}` : "Connecting…"}
+            </DialogDescription>
+          </div>
+          <Badge variant="outline" className={`text-[10px] rounded-full px-2 font-mono uppercase ${connected ? "text-primary bg-primary/10 border-primary/20" : "text-muted-foreground bg-muted/50"}`}>
+            {connected ? "connected" : error ? "error" : "connecting"}
+          </Badge>
+        </DialogHeader>
+
+        <div
+          ref={outputRef}
+          className="h-[380px] overflow-y-auto bg-[#0d0d0d] p-4 font-mono text-[12px] text-green-400 leading-relaxed cursor-text"
+          onClick={() => inputRef.current?.focus()}
+        >
+          {lines.map((line, i) => (
+            <div key={i} className="whitespace-pre-wrap break-all">{line}</div>
+          ))}
+          {!connected && !error && (
+            <div className="flex items-center gap-2 text-muted-foreground text-xs">
+              <Loader2 className="w-3 h-3 animate-spin" /> Connecting to container shell…
+            </div>
+          )}
+          {error && <div className="text-red-400 text-xs">{error}</div>}
+        </div>
+
+        <form onSubmit={sendInput} className="border-t border-border bg-[#111] flex items-center px-3 py-2 gap-2">
+          <span className="font-mono text-xs text-green-500 shrink-0">$</span>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "c" && e.ctrlKey) { socket.emit("docker:exec:input", "\x03"); setInput(""); e.preventDefault(); }
+              if (e.key === "l" && e.ctrlKey) { setLines([]); e.preventDefault(); }
+            }}
+            className="flex-1 bg-transparent font-mono text-xs text-green-400 outline-none placeholder:text-muted-foreground/30"
+            placeholder={connected ? "Type a command…" : "Waiting for connection…"}
+            disabled={!connected}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Button type="submit" size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground" disabled={!connected || !input.trim()}>
+            <Play className="w-3 h-3" />
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Three-dot menu ────────────────────────────────────────────────────────────
+type DialogType = "logs" | "network" | "mounts" | "terminal" | null;
+
+function ContainerMenu({ container, onSelect }: { container: DockerContainer; onSelect: (type: DialogType) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground">
+          <MoreHorizontal className="w-4 h-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("logs")}>
+          <FileText className="w-3.5 h-3.5" /> View Logs
+        </DropdownMenuItem>
+        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("network")}>
+          <Network className="w-3.5 h-3.5" /> View Network
+        </DropdownMenuItem>
+        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("mounts")}>
+          <HardDrive className="w-3.5 h-3.5" /> View Mounts
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("terminal")} disabled={container.state !== "running"}>
+          <Terminal className="w-3.5 h-3.5" /> Open Terminal
+          {container.state !== "running" && <span className="ml-auto text-[10px] text-muted-foreground">not running</span>}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 export default function DockerPage() {
   const { theme, toggle } = useTheme();
   const qc = useQueryClient();
@@ -20,11 +363,23 @@ export default function DockerPage() {
   const { data: containersData, isLoading } = useGetDockerContainers();
   const [bulkAction, setBulkAction] = useState<"start" | "stop" | "restart" | "remove" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [activeContainer, setActiveContainer] = useState<DockerContainer | null>(null);
+  const [activeDialog, setActiveDialog] = useState<DialogType>(null);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["docker-containers"] });
     qc.invalidateQueries({ queryKey: ["docker-status"] });
   };
+
+  function openDialog(container: DockerContainer, type: DialogType) {
+    setActiveContainer(container);
+    setActiveDialog(type);
+  }
+
+  function closeDialog() {
+    setActiveDialog(null);
+    setActiveContainer(null);
+  }
 
   async function action(id: string, fn: (id: string) => Promise<void>, label: string) {
     setBusy(id);
@@ -117,29 +472,19 @@ export default function DockerPage() {
             </div>
           )}
 
-          {/* Bulk actions */}
           <Card className="bg-background border-border shadow-none rounded-xl">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-medium tracking-tight">Bulk Actions</CardTitle>
               <CardDescription className="text-xs text-muted-foreground">Apply an action to all containers at once.</CardDescription>
             </CardHeader>
             <CardContent className="p-4 pt-2 flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("start")}>
-                <Play className="w-3.5 h-3.5 mr-1" />Start All
-              </Button>
-              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("stop")}>
-                <Square className="w-3.5 h-3.5 mr-1" />Stop All
-              </Button>
-              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("restart")}>
-                <RotateCw className="w-3.5 h-3.5 mr-1" />Restart All
-              </Button>
-              <Button variant="destructive" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("remove")}>
-                <Trash2 className="w-3.5 h-3.5 mr-1" />Remove All
-              </Button>
+              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("start")}><Play className="w-3.5 h-3.5 mr-1" />Start All</Button>
+              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("stop")}><Square className="w-3.5 h-3.5 mr-1" />Stop All</Button>
+              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("restart")}><RotateCw className="w-3.5 h-3.5 mr-1" />Restart All</Button>
+              <Button variant="destructive" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("remove")}><Trash2 className="w-3.5 h-3.5 mr-1" />Remove All</Button>
             </CardContent>
           </Card>
 
-          {/* Containers table */}
           <Card className="bg-background border-border shadow-none rounded-xl overflow-hidden">
             <CardHeader className="p-4 pb-3 border-b border-border/50">
               <CardTitle className="text-sm font-medium tracking-tight">Containers</CardTitle>
@@ -187,6 +532,7 @@ export default function DockerPage() {
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" disabled={busy === c.id} title="Remove" onClick={() => action(c.id, dockerRemove, "Remove")}>
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
+                          <ContainerMenu container={c} onSelect={(type) => openDialog(c, type)} />
                         </div>
                       </TableCell>
                     </TableRow>
@@ -198,6 +544,7 @@ export default function DockerPage() {
         </main>
       </div>
 
+      {/* Bulk confirm */}
       <AlertDialog open={!!bulkAction} onOpenChange={(o) => { if (!o) setBulkAction(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -212,6 +559,20 @@ export default function DockerPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Contextual dialogs */}
+      {activeContainer && activeDialog === "logs" && (
+        <LogsDialog container={activeContainer} open={true} onClose={closeDialog} />
+      )}
+      {activeContainer && activeDialog === "network" && (
+        <NetworkDialog container={activeContainer} open={true} onClose={closeDialog} />
+      )}
+      {activeContainer && activeDialog === "mounts" && (
+        <MountsDialog container={activeContainer} open={true} onClose={closeDialog} />
+      )}
+      {activeContainer && activeDialog === "terminal" && (
+        <TerminalDialog container={activeContainer} open={true} onClose={closeDialog} />
+      )}
     </div>
   );
 }

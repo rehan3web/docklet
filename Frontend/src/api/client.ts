@@ -505,6 +505,14 @@ export function useGetDockerContainers() {
   });
 }
 
+export async function dockerLogs(id: string, tail = 300): Promise<{ logs: string }> {
+  return apiFetch(`/docker/containers/${id}/logs?tail=${tail}`);
+}
+
+export async function dockerInspect(id: string): Promise<{ networks: Record<string, any>; mounts: any[]; hostname: string | null }> {
+  return apiFetch(`/docker/containers/${id}/inspect`);
+}
+
 export async function dockerStart(id: string): Promise<void> { return apiFetch(`/docker/containers/${id}/start`, { method: "POST" }); }
 export async function dockerStop(id: string): Promise<void> { return apiFetch(`/docker/containers/${id}/stop`, { method: "POST" }); }
 export async function dockerRestart(id: string): Promise<void> { return apiFetch(`/docker/containers/${id}/restart`, { method: "POST" }); }
