@@ -232,7 +232,7 @@ function TerminalDialog({ container, open, onClose }: { container: DockerContain
   const appendOutput = useCallback((text: string) => {
     const cleaned = stripAnsi(text);
     setLines(prev => {
-      const all = (prev.join("") + cleaned).split("\n");
+      const all = (prev.join("\n") + cleaned).split("\n");
       return all.slice(-500);
     });
   }, []);
