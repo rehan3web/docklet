@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Terminal as TerminalIcon, Sparkles, Settings, AlertTriangle, Loader2, Trash2, Sun, Moon } from "lucide-react";
+import { Terminal as TerminalIcon, Sparkles, Settings, AlertTriangle, Loader2, Trash2, Sun, Moon, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -51,6 +51,20 @@ export default function TerminalPage() {
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiGenerated, setAiGenerated] = useState<{ command: string; safe: boolean; reason?: string } | null>(null);
+
+  // Auto Run
+  const [autoRun, setAutoRun] = useState(() => {
+    try { return localStorage.getItem("terminal-autorun") === "true"; } catch { return false; }
+  });
+  const [autoRunPending, setAutoRunPending] = useState<{ command: string; safe: boolean; reason?: string } | null>(null);
+
+  function toggleAutoRun() {
+    setAutoRun(v => {
+      const next = !v;
+      try { localStorage.setItem("terminal-autorun", String(next)); } catch {}
+      return next;
+    });
+  }
 
   // Persistent working directory (updated after every command)
   const [cwd, setCwd] = useState("/usr/src/app");
@@ -195,9 +209,14 @@ export default function TerminalPage() {
     if (!aiPrompt.trim() || !settings?.configured) return;
     setAiLoading(true);
     setAiGenerated(null);
+    setAutoRunPending(null);
     try {
       const r = await generateAiCommand(aiPrompt.trim());
-      setAiGenerated(r);
+      if (autoRun) {
+        setAutoRunPending(r);
+      } else {
+        setAiGenerated(r);
+      }
     } catch (err: any) {
       toast.error(err.message || "AI request failed");
     } finally {
@@ -408,14 +427,29 @@ export default function TerminalPage() {
 
           {/* ── AI Generate Command ─────────────────────────────────── */}
           <div className="shrink-0 border-t border-border bg-background overflow-hidden">
-            <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/50">
-              <div className="p-1.5 rounded-md bg-primary/10 border border-primary/20 shrink-0">
-                <Sparkles className="w-3.5 h-3.5 text-primary" />
+            <div className="flex items-center justify-between gap-2.5 px-4 py-3 border-b border-border/50">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-1.5 rounded-md bg-primary/10 border border-primary/20 shrink-0">
+                  <Sparkles className="w-3.5 h-3.5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium leading-none">AI Assistant</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Describe a task — NVIDIA LLM will produce a shell command</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium leading-none">AI Assistant</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Describe a task — NVIDIA LLM will produce a shell command</p>
-              </div>
+              {/* Auto Run toggle */}
+              <button
+                onClick={toggleAutoRun}
+                title={autoRun ? "Auto Run is ON — generated commands run automatically after confirmation" : "Auto Run is OFF — generated commands are inserted for manual review"}
+                className={`shrink-0 flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all ${
+                  autoRun
+                    ? "bg-red-500/10 border-red-500/30 text-red-500 dark:text-red-400"
+                    : "bg-muted/40 border-border text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                }`}
+              >
+                <Zap className={`w-3 h-3 ${autoRun ? "fill-red-500 dark:fill-red-400" : ""}`} />
+                Auto Run {autoRun ? "ON" : "OFF"}
+              </button>
             </div>
             <div className="p-4 space-y-3">
               {!settings?.configured && (
@@ -503,6 +537,55 @@ export default function TerminalPage() {
             <Button variant="ghost" onClick={() => { setPendingExec(null); setConfirmInput(""); }}>Cancel</Button>
             <Button variant="destructive" disabled={confirmInput !== "I CONFIRM"} onClick={handleConfirmedRun}>
               Execute Anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Auto Run Confirmation ── */}
+      <Dialog open={!!autoRunPending} onOpenChange={o => { if (!o) setAutoRunPending(null); }}>
+        <DialogContent className="sm:max-w-[440px] border-destructive/30">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2.5 text-destructive">
+              <div className="p-1.5 rounded-md bg-destructive/10 border border-destructive/20 shrink-0">
+                <Zap className="w-4 h-4" />
+              </div>
+              Auto-Run Confirmation
+            </DialogTitle>
+            <DialogDescription className="pt-1">
+              Auto-Run is <strong>ON</strong>. The command below will execute immediately once you confirm.
+              {autoRunPending && !autoRunPending.safe && " This command has also been flagged as potentially dangerous."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            {autoRunPending && !autoRunPending.safe && (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/20 text-[11px] text-red-500 dark:text-red-400">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>{autoRunPending.reason}</span>
+              </div>
+            )}
+            <div className="rounded-lg bg-[#f5f5f5] dark:bg-[#0d0d0d] border border-[#e0e0e0] dark:border-[#252525] px-4 py-3">
+              <code className="font-mono text-[12px] text-[#166534] dark:text-[#86efac] break-all leading-relaxed">
+                {autoRunPending?.command}
+              </code>
+            </div>
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-500/5 border border-amber-500/20 text-[11px] text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>This command will run directly in your server container. Review it carefully before confirming.</span>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setAutoRunPending(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const cmd = autoRunPending!.command;
+                setAutoRunPending(null);
+                setAiPrompt("");
+                runCommand(cmd);
+              }}
+            >
+              <Zap className="w-3.5 h-3.5 mr-1.5" /> Run Command
             </Button>
           </DialogFooter>
         </DialogContent>
