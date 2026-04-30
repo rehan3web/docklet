@@ -72,16 +72,6 @@ router.post('/exec', authenticateToken, async (req, res) => {
         });
     }
 
-    // In root mode, prefix with sudo unless already running as root
-    const isAlreadyRoot = process.getuid ? process.getuid() === 0 : false;
-    const execCmd = rootMode && !isAlreadyRoot ? `sudo ${cmd}` : cmd;
-
-    // Allow the client to supply its own id so it can subscribe to live socket
-    // events for this command BEFORE the HTTP response arrives. This prevents
-    // a race where terminal-start/output events would otherwise be dropped by
-    // the client's id-gating filter. The id is per-user-room scoped, so a
-    // client-controlled id can only ever cross-talk with the same user's
-    // other commands (which they could trigger anyway).
     const safeClientId = (typeof clientId === 'string' && /^c_[a-zA-Z0-9]{6,32}$/.test(clientId))
         ? clientId
         : null;
@@ -89,13 +79,27 @@ router.post('/exec', authenticateToken, async (req, res) => {
     const startedAt = Date.now();
     const userId = getUserId(req);
 
-    emitToUser(userId, 'terminal-start', { id, command: execCmd, timestamp: startedAt });
-
-    const shell = existsSync('/bin/bash') ? '/bin/bash' : '/bin/sh';
-    const child = spawn(shell, ['-c', execCmd], {
-        cwd: process.cwd(),
-        env: process.env,
-    });
+    // Root mode: use nsenter to break out to the host OS namespaces (PID 1).
+    // This gives the command full access to the real VPS filesystem and processes,
+    // not just the container's. Requires pid:host + SYS_PTRACE/SYS_ADMIN caps in
+    // postgres.yml. Sandbox mode runs normally inside the container.
+    let child: ReturnType<typeof spawn>;
+    let execCmd: string;
+    if (rootMode) {
+        execCmd = cmd;
+        emitToUser(userId, 'terminal-start', { id, command: execCmd, timestamp: startedAt });
+        child = spawn('nsenter', ['-t', '1', '-m', '-u', '-i', '-n', '-p', '--', 'bash', '-c', cmd], {
+            env: process.env,
+        });
+    } else {
+        execCmd = cmd;
+        emitToUser(userId, 'terminal-start', { id, command: execCmd, timestamp: startedAt });
+        const shell = existsSync('/bin/bash') ? '/bin/bash' : '/bin/sh';
+        child = spawn(shell, ['-c', cmd], {
+            cwd: process.cwd(),
+            env: process.env,
+        });
+    }
 
     let output = '';
     let finished = false;

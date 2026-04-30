@@ -71,6 +71,10 @@ services:
     build:
       context: ./Backend
     restart: unless-stopped
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
     ports:
       - "127.0.0.1:3001:3001"
     depends_on:
