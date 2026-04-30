@@ -22,18 +22,24 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { getSocket } from "@/api/socket";
 
-// ── strip ANSI / VT escape sequences (including bracketed paste mode) ──────────
+// ── strip ALL ANSI / VT escape sequences ──────────────────────────────────────
 function stripAnsi(str: string): string {
   return str
-    // CSI sequences: ESC [ ... (any params/intermediates) ... final-byte
+    // CSI sequences: ESC [ params final-byte
     .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "")
-    // OSC sequences: ESC ] ... ST or BEL
+    // OSC sequences: ESC ] ... BEL or ST
     .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, "")
-    // 2-char ESC sequences
-    .replace(/\x1B[@-Z\\-_]/g, "")
-    // C1 control codes
+    // DCS / PM / APC / SOS string sequences: ESC P|X|^|_ ... ST
+    .replace(/\x1B[PX^_][^\x1B]*(?:\x1B\\)/g, "")
+    // ESC with intermediate bytes (e.g. ESC(B = select ASCII charset)
+    .replace(/\x1B[ -/]+[@-~]/g, "")
+    // Remaining 2-char ESC sequences (ESC + any printable ASCII)
+    .replace(/\x1B[@-~]/g, "")
+    // Any lone ESC byte left over
+    .replace(/\x1B/g, "")
+    // C1 control codes (0x80–0x9F)
     .replace(/[\x80-\x9F]/g, "")
-    // carriage returns
+    // Carriage returns
     .replace(/\r/g, "");
 }
 
@@ -279,14 +285,13 @@ function TerminalDialog({ container, open, onClose }: { container: DockerContain
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-[760px] p-0 gap-0 overflow-hidden">
         <DialogHeader className="p-4 pb-3 border-b border-border">
-          <DialogTitle className="text-sm font-medium flex items-center gap-2 flex-wrap">
-            <Terminal className="w-4 h-4 text-muted-foreground shrink-0" />
+          <DialogTitle className="text-sm font-medium flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-muted-foreground" />
             Terminal — {container.names[0] || container.shortId}
-            <span className="text-muted-foreground/40 font-normal">·</span>
-            <span className="text-xs text-muted-foreground font-normal">
-              {connected ? "Connected — type commands and press Enter" : error ? `Error: ${error}` : "Connecting…"}
-            </span>
           </DialogTitle>
+          <DialogDescription className="text-xs mt-0.5">
+            {connected ? "Connected — type commands and press Enter" : error ? `Error: ${error}` : "Connecting…"}
+          </DialogDescription>
         </DialogHeader>
 
         <div
