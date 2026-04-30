@@ -97,7 +97,7 @@ function BackupTab() {
                         <Button size="sm" variant="ghost" className="h-8 px-2 text-xs gap-1" onClick={() => refetch()}>
                             <RefreshCw className="w-3.5 h-3.5" />
                         </Button>
-                        <Button size="sm" variant="outline" className="h-8 px-3 text-xs font-medium gap-1.5" onClick={handleBackup} disabled={creating}>
+                        <Button size="sm" className="h-8 px-3 text-xs font-medium gap-1.5 border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={handleBackup} disabled={creating}>
                             {creating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                             {creating ? "Creating..." : "Create Backup"}
                         </Button>
@@ -244,7 +244,7 @@ function RestoreTab() {
                                             <div className="flex items-center gap-1.5 shrink-0"><RefreshCw className="w-3.5 h-3.5 text-primary animate-spin" /><span className="text-[10px] text-primary font-semibold">Restoring...</span></div>
                                         ) : (
                                             <div className="flex items-center gap-2 shrink-0">
-                                                <Button size="sm" variant="outline" className="h-7 px-3 text-xs gap-1" onClick={() => handleRestore(file.id)}>
+                                                <Button size="sm" className="h-7 px-3 text-xs gap-1 border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={() => handleRestore(file.id)}>
                                                     <Upload className="w-3 h-3" />Restore
                                                 </Button>
                                                 <button onClick={() => removeFile(file.id)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><X className="w-3.5 h-3.5" /></button>

@@ -171,7 +171,7 @@ export default function ProxyPage() {
               <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={handleReload}>
                 <RefreshCw className="w-3.5 h-3.5 mr-2" />Reload nginx
               </Button>
-              <Button size="sm" className="h-8 rounded-full text-xs" onClick={() => setShowCreate(v => !v)}>
+              <Button size="sm" className="h-8 rounded-full text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={() => setShowCreate(v => !v)}>
                 <Plus className="w-3.5 h-3.5 mr-2" />Add Domain
               </Button>
             </div>
@@ -204,7 +204,7 @@ export default function ProxyPage() {
                     <Input value={targetPort} onChange={e => setTargetPort(e.target.value)} placeholder="8000" type="number" min={1} max={65535} className="font-mono text-xs h-9" />
                   </div>
                   <div className="flex items-end gap-2">
-                    <Button type="submit" disabled={creating || !domain.trim() || !targetPort.trim()} className="h-9 px-5 text-xs">
+                    <Button type="submit" disabled={creating || !domain.trim() || !targetPort.trim()} className="h-9 px-5 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
                       {creating && <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />}Create
                     </Button>
                     <Button type="button" variant="ghost" className="h-9 px-3 text-xs" onClick={() => setShowCreate(false)}>Cancel</Button>
@@ -356,7 +356,7 @@ export default function ProxyPage() {
                           <Label className="text-xs text-muted-foreground">Email for Let's Encrypt notifications</Label>
                           <Input value={sslEmail} onChange={e => setSslEmail(e.target.value)} placeholder="admin@example.com" type="email" className="font-mono text-xs h-9" disabled={sslRunning} />
                         </div>
-                        <Button onClick={handleSSL} disabled={sslRunning || !sslEmail.trim()} className="w-full h-9 text-xs">
+                        <Button onClick={handleSSL} disabled={sslRunning || !sslEmail.trim()} className="w-full h-9 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
                           {sslRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : <ShieldCheck className="w-3.5 h-3.5 mr-2" />}
                           {sslRunning ? "Running certbot..." : "Enable SSL"}
                         </Button>

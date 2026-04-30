@@ -312,7 +312,7 @@ export default function SshPage() {
 
                   <Button
                     type="submit"
-                    className="w-full h-9 gap-2"
+                    className="w-full h-9 gap-2 border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none"
                     disabled={status === "connecting" || !host.trim() || !username.trim() || !password}
                   >
                     {status === "connecting"

@@ -482,14 +482,14 @@ export default function TerminalPage() {
                   )}
                   <div className="flex items-center justify-between gap-3 px-3 py-2.5">
                     <code className="font-mono text-[12px] text-[#166534] dark:text-[#86efac] flex-1 truncate">{aiGenerated.command}</code>
-                    <Button size="sm" className="h-7 px-3 text-[11px] shrink-0 rounded-md" onClick={insertGenerated}>
+                    <Button size="sm" className="h-7 px-3 text-[11px] shrink-0 rounded-md border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={insertGenerated}>
                       Insert into Terminal
                     </Button>
                   </div>
                 </div>
               )}
               <Button
-                className="w-full h-9 text-sm gap-2"
+                className="w-full h-9 text-sm gap-2 border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none"
                 onClick={handleAiGenerate}
                 disabled={!settings?.configured || aiLoading || !aiPrompt.trim()}
               >
@@ -629,7 +629,7 @@ export default function TerminalPage() {
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setSettingsOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveSettings} disabled={!settingsKey.trim()}>Save</Button>
+            <Button className="border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={handleSaveSettings} disabled={!settingsKey.trim()}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
