@@ -27,6 +27,13 @@ type HistoryEntry = {
 const HISTORY_LIMIT = 100;
 const userHistory = new Map<string, HistoryEntry[]>();
 
+// Per-user persistent working directory for each terminal mode.
+const rootCwd  = new Map<string, string>();
+const sandboxCwd = new Map<string, string>();
+
+const CWD_MARKER_START = '~~DOCKLET_CWD_START~~';
+const CWD_MARKER_END   = '~~DOCKLET_CWD_END~~';
+
 function getUserId(req: any): string {
     const u = req.user;
     return String(u?.id ?? u?.username ?? 'anonymous');
@@ -58,6 +65,15 @@ router.post('/safety-check', authenticateToken, (req, res) => {
     res.json(result);
 });
 
+// Return the current working directory for each terminal mode.
+router.get('/cwd', authenticateToken, (req, res) => {
+    const userId = getUserId(req);
+    res.json({
+        rootCwd:    rootCwd.get(userId)    || '/root',
+        sandboxCwd: sandboxCwd.get(userId) || '/usr/src/app',
+    });
+});
+
 router.post('/exec', authenticateToken, async (req, res) => {
     const { command, confirm, clientId, rootMode } = req.body || {};
     const cmd = (command || '').toString().trim();
@@ -79,30 +95,68 @@ router.post('/exec', authenticateToken, async (req, res) => {
     const startedAt = Date.now();
     const userId = getUserId(req);
 
-    // Root mode: use nsenter to break out to the host OS namespaces (PID 1).
-    // This gives the command full access to the real VPS filesystem and processes,
-    // not just the container's. Requires pid:host + SYS_PTRACE/SYS_ADMIN caps in
-    // postgres.yml. Sandbox mode runs normally inside the container.
+    // Wrap the user command with cwd persistence:
+    //   cd <stored_cwd>; <user_cmd>; echo "~~DOCKLET_CWD_START~~$(pwd)~~DOCKLET_CWD_END~~"
+    // After output is collected we parse+strip the marker and store the new cwd.
     let child: ReturnType<typeof spawn>;
     let execCmd: string;
     if (rootMode) {
+        const cwd = rootCwd.get(userId) || '/root';
         execCmd = cmd;
+        const wrapped = `cd ${JSON.stringify(cwd)} 2>/dev/null || true; ${cmd}; echo "${CWD_MARKER_START}$(pwd)${CWD_MARKER_END}"`;
         emitToUser(userId, 'terminal-start', { id, command: execCmd, timestamp: startedAt });
-        child = spawn('nsenter', ['-t', '1', '-m', '-u', '-i', '-n', '-p', '--', 'bash', '-c', cmd], {
+        child = spawn('nsenter', ['-t', '1', '-m', '-u', '-i', '-n', '-p', '--', 'bash', '-c', wrapped], {
             env: process.env,
         });
     } else {
+        const cwd = sandboxCwd.get(userId) || '/usr/src/app';
         execCmd = cmd;
+        const wrapped = `cd ${JSON.stringify(cwd)} 2>/dev/null || true; ${cmd}; echo "${CWD_MARKER_START}$(pwd)${CWD_MARKER_END}"`;
         emitToUser(userId, 'terminal-start', { id, command: execCmd, timestamp: startedAt });
         const shell = existsSync('/bin/bash') ? '/bin/bash' : '/bin/sh';
-        child = spawn(shell, ['-c', cmd], {
-            cwd: process.cwd(),
-            env: process.env,
-        });
+        child = spawn(shell, ['-c', wrapped], { env: process.env });
     }
 
     let output = '';
     let finished = false;
+    let detectedCwd = '';
+
+    // Stdout is buffered so we can intercept and strip the cwd marker line
+    // before it reaches the client's terminal display.
+    let stdoutBuf = '';
+    const HOLD = CWD_MARKER_START.length - 1;
+
+    function flushStdout(force = false) {
+        const markerIdx = stdoutBuf.indexOf(CWD_MARKER_START);
+        if (markerIdx !== -1) {
+            // Emit everything before the marker
+            const before = stdoutBuf.slice(0, markerIdx);
+            if (before) {
+                output += before;
+                emitToUser(userId, 'terminal-output', { id, chunk: before, stream: 'stdout' });
+            }
+            // Extract the new cwd
+            const endIdx = stdoutBuf.indexOf(CWD_MARKER_END, markerIdx);
+            if (endIdx !== -1) {
+                detectedCwd = stdoutBuf.slice(markerIdx + CWD_MARKER_START.length, endIdx).trim();
+            }
+            stdoutBuf = ''; // discard everything from marker onward
+        } else if (force) {
+            if (stdoutBuf) {
+                output += stdoutBuf;
+                emitToUser(userId, 'terminal-output', { id, chunk: stdoutBuf, stream: 'stdout' });
+                stdoutBuf = '';
+            }
+        } else {
+            // Hold back enough bytes that a split marker can still be detected
+            if (stdoutBuf.length > HOLD) {
+                const toEmit = stdoutBuf.slice(0, stdoutBuf.length - HOLD);
+                output += toEmit;
+                emitToUser(userId, 'terminal-output', { id, chunk: toEmit, stream: 'stdout' });
+                stdoutBuf = stdoutBuf.slice(stdoutBuf.length - HOLD);
+            }
+        }
+    }
 
     const timeout = setTimeout(() => {
         if (!finished) {
@@ -112,9 +166,8 @@ router.post('/exec', authenticateToken, async (req, res) => {
     }, COMMAND_TIMEOUT_MS);
 
     child.stdout?.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        emitToUser(userId, 'terminal-output', { id, chunk, stream: 'stdout' });
+        stdoutBuf += data.toString();
+        flushStdout();
     });
     child.stderr?.on('data', (data) => {
         const chunk = data.toString();
@@ -125,6 +178,7 @@ router.post('/exec', authenticateToken, async (req, res) => {
     child.on('error', (err) => {
         finished = true;
         clearTimeout(timeout);
+        flushStdout(true);
         const errMsg = `\n[failed to spawn: ${err.message}]\n`;
         output += errMsg;
         emitToUser(userId, 'terminal-output', { id, chunk: errMsg, stream: 'stderr' });
@@ -140,12 +194,19 @@ router.post('/exec', authenticateToken, async (req, res) => {
         if (finished) return;
         finished = true;
         clearTimeout(timeout);
+        flushStdout(true);
+        // Persist the detected cwd; fall back to the previous value on failure
+        if (detectedCwd) {
+            if (rootMode) rootCwd.set(userId, detectedCwd);
+            else sandboxCwd.set(userId, detectedCwd);
+        }
+        const newCwd = detectedCwd || (rootMode ? rootCwd.get(userId) || '/root' : sandboxCwd.get(userId) || '/usr/src/app');
         const durationMs = Date.now() - startedAt;
         const entry: HistoryEntry = { id, command: cmd, output, exitCode, timestamp: startedAt, durationMs };
         pushHistory(userId, entry);
-        emitToUser(userId, 'terminal-end', { id, exitCode, durationMs });
+        emitToUser(userId, 'terminal-end', { id, exitCode, durationMs, cwd: newCwd });
         if (!res.headersSent) {
-            res.json({ id, output, exitCode, durationMs });
+            res.json({ id, output, exitCode, durationMs, cwd: newCwd });
         }
     });
 });

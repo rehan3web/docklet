@@ -17,6 +17,7 @@ import {
   execCommand,
   clearTerminalHistory,
   generateClientCommandId,
+  getTerminalCwd,
 } from "@/api/client";
 import { getSocket } from "@/api/socket";
 import { useQueryClient } from "@tanstack/react-query";
@@ -32,6 +33,7 @@ export default function TerminalPage() {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
   const activeIdRef = useRef<string | null>(null);
+  const rootModeRef = useRef(false);
   const hiddenInputRef = useRef<HTMLInputElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const [termFocused, setTermFocused] = useState(false);
@@ -52,6 +54,15 @@ export default function TerminalPage() {
 
   // Root mode
   const [rootMode, setRootMode] = useState(false);
+  useEffect(() => { rootModeRef.current = rootMode; }, [rootMode]);
+
+  // Persistent working directory (updated after every command)
+  const [cwd, setCwd] = useState<{ root: string; sandbox: string }>({ root: "/root", sandbox: "/usr/src/app" });
+
+  // Fetch initial cwd from backend on mount
+  useEffect(() => {
+    getTerminalCwd().then(r => setCwd({ root: r.rootCwd, sandbox: r.sandboxCwd })).catch(() => {});
+  }, []);
 
   // Settings dialog
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -74,9 +85,12 @@ export default function TerminalPage() {
       if (e.id !== activeIdRef.current) return;
       setLogs(prev => [...prev, { stream: e.stream, text: e.chunk }]);
     };
-    const onEnd = (e: { id: string; exitCode: number; durationMs: number }) => {
+    const onEnd = (e: { id: string; exitCode: number; durationMs: number; cwd?: string }) => {
       if (e.id !== activeIdRef.current) return;
       setLogs(prev => [...prev, { stream: "system", text: `[exit ${e.exitCode} · ${e.durationMs}ms]` }]);
+      if (e.cwd) {
+        setCwd(prev => rootModeRef.current ? { ...prev, root: e.cwd! } : { ...prev, sandbox: e.cwd! });
+      }
       setRunning(false);
       activeIdRef.current = null;
     };
@@ -416,6 +430,9 @@ export default function TerminalPage() {
 
                   {/* $ / # prompt line */}
                   <div className="flex items-center gap-0 mt-0.5" onClick={e => e.stopPropagation()}>
+                    <span className={`mr-2 select-none font-mono text-xs ${rootMode ? "text-red-400 dark:text-red-500" : "text-[#aaa] dark:text-[#555]"}`}>
+                      {(rootMode ? cwd.root : cwd.sandbox).replace(/^\/root(\/|$)/, "~$1").replace(/^\/home\/[^/]+/, "~")}
+                    </span>
                     <span className={`mr-2 select-none font-bold ${rootMode ? "text-red-400 dark:text-red-500" : "text-[#bbb] dark:text-[#555]"}`}>
                       {rootMode ? "#" : "$"}
                     </span>

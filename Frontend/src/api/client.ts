@@ -427,11 +427,15 @@ export async function checkCommandSafety(command: string): Promise<{ safe: boole
   });
 }
 
-export async function execCommand(command: string, confirm?: string, clientId?: string, rootMode?: boolean): Promise<{ id: string; output: string; exitCode: number; durationMs?: number; requiresConfirmation?: boolean; reason?: string; message?: string }> {
+export async function execCommand(command: string, confirm?: string, clientId?: string, rootMode?: boolean): Promise<{ id: string; output: string; exitCode: number; durationMs?: number; cwd?: string; requiresConfirmation?: boolean; reason?: string; message?: string }> {
   return apiFetch("/terminal/exec", {
     method: "POST",
     body: JSON.stringify({ command, confirm, clientId, rootMode }),
   });
+}
+
+export async function getTerminalCwd(): Promise<{ rootCwd: string; sandboxCwd: string }> {
+  return apiFetch("/terminal/cwd");
 }
 
 export type TerminalSettings = { configured: boolean; model: string; apiKeyMasked: string | null };
