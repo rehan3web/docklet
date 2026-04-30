@@ -574,18 +574,20 @@ function ShareDialog({ bucket, file, open, onClose, isPublic, domain, serverIP }
             </div>
             {shareUrl ? (
               <div className="space-y-1.5">
-                <div className="flex items-center gap-2 rounded-lg bg-muted/40 border border-border px-3 py-2">
-                  <code className="text-[10px] font-mono text-primary flex-1 truncate">{shareUrl}</code>
-                  <button onClick={() => copyText(shareUrl, "private")} className="text-muted-foreground hover:text-foreground shrink-0">
-                    {copied === "private" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
-                  <a href={shareUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground shrink-0">
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
+                <div className="rounded-lg bg-muted/40 border border-border px-3 py-2 space-y-1.5">
+                  <code className="block text-[10px] font-mono text-primary break-all leading-relaxed">{shareUrl}</code>
+                  <div className="flex items-center gap-2 border-t border-border/50 pt-1.5">
+                    <p className="text-[10px] text-muted-foreground flex items-center gap-1 flex-1">
+                      <Timer className="w-3 h-3 shrink-0" />Expires {format(new Date(expiresAt), "MMM dd, yyyy 'at' HH:mm")}
+                    </p>
+                    <button onClick={() => copyText(shareUrl, "private")} className="text-muted-foreground hover:text-foreground shrink-0 flex items-center gap-1 text-[10px]">
+                      {copied === "private" ? <><Check className="w-3.5 h-3.5 text-emerald-500" /><span className="text-emerald-500">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+                    </button>
+                    <a href={shareUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground shrink-0" title="Open in new tab">
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-                  <Timer className="w-3 h-3" />Expires {format(new Date(expiresAt), "MMM dd, yyyy 'at' HH:mm")}
-                </p>
               </div>
             ) : (
               <Button size="sm" onClick={generate} disabled={busy} className="h-7 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
@@ -594,31 +596,35 @@ function ShareDialog({ bucket, file, open, onClose, isPublic, domain, serverIP }
             )}
           </div>
 
-          {/* Public access */}
-          {publicUrl && isPublic && (
+          {/* Public / Direct URL — always show when an endpoint is known */}
+          {publicUrl && (
             <div className="border-t border-border pt-4 space-y-2">
               <div className="flex items-center gap-2">
-                <Unlock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                {isPublic ? <Unlock className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> : <Lock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
                 <span className="text-xs font-medium">Public Direct URL</span>
-                <Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full ml-auto text-emerald-600 bg-emerald-500/10 border-emerald-500/20">Public Bucket</Badge>
+                <Badge variant="outline" className={`text-[10px] px-2 py-0 rounded-full ml-auto ${isPublic ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" : "text-muted-foreground"}`}>
+                  {isPublic ? "Public" : "Private"}
+                </Badge>
               </div>
-              <div className="flex items-center gap-2 rounded-lg bg-muted/40 border border-border px-3 py-2">
-                <code className="text-[10px] font-mono text-primary flex-1 truncate">{publicUrl}</code>
-                <button onClick={() => copyText(publicUrl, "public")} className="text-muted-foreground hover:text-foreground shrink-0">
-                  {copied === "public" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-                <a href={publicUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground shrink-0">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
+              <div className="rounded-lg bg-muted/40 border border-border px-3 py-2 space-y-1.5">
+                <code className="block text-[10px] font-mono text-primary break-all leading-relaxed">{publicUrl}</code>
+                <div className="flex items-center gap-2 border-t border-border/50 pt-1.5">
+                  {!isPublic && (
+                    <p className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center gap-1 flex-1">
+                      <Lock className="w-3 h-3 shrink-0" />Bucket is private — toggle Public in Files to activate
+                    </p>
+                  )}
+                  {isPublic && <span className="flex-1" />}
+                  <button onClick={() => copyText(publicUrl, "public")} className="text-muted-foreground hover:text-foreground shrink-0 flex items-center gap-1 text-[10px]">
+                    {copied === "public" ? <><Check className="w-3.5 h-3.5 text-emerald-500" /><span className="text-emerald-500">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+                  </button>
+                  {isPublic && (
+                    <a href={publicUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground shrink-0">
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-
-          {publicUrl && !isPublic && (
-            <div className="border-t border-border pt-4">
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5" />This bucket is private. Toggle to <strong className="text-foreground">Public</strong> in the Files view to enable direct URL access.
-              </p>
             </div>
           )}
         </div>
