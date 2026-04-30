@@ -262,8 +262,8 @@ function pullImage(tag: string): Promise<void> {
     });
 }
 
-async function waitForMinio(accessKey: string, secretKey: string, retries = 15): Promise<void> {
-    const cfg = { endpoint: '127.0.0.1', port: 9000, access_key: accessKey, secret_key: secretKey, region: 'us-east-1', use_ssl: false };
+async function waitForMinio(endpoint: string, accessKey: string, secretKey: string, retries = 20): Promise<void> {
+    const cfg = { endpoint, port: 9000, access_key: accessKey, secret_key: secretKey, region: 'us-east-1', use_ssl: false };
     for (let i = 0; i < retries; i++) {
         await new Promise(r => setTimeout(r, 1500));
         try {
@@ -272,6 +272,16 @@ async function waitForMinio(accessKey: string, secretKey: string, retries = 15):
         } catch { /* not ready yet */ }
     }
     throw new Error('MinIO did not become ready in time — check Docker logs for errors');
+}
+
+async function getContainerIP(name: string): Promise<string> {
+    const info = await getDocker().getContainer(name).inspect();
+    // Try all networks, prefer bridge
+    const nets = info.NetworkSettings?.Networks || {};
+    for (const key of ['bridge', ...Object.keys(nets)]) {
+        if (nets[key]?.IPAddress) return nets[key].IPAddress;
+    }
+    throw new Error('Could not determine container IP address');
 }
 
 // GET /storage/instance — status of the managed MinIO container
@@ -325,20 +335,23 @@ router.post('/instance', async (req, res) => {
         });
         await container.start();
 
-        // Wait for MinIO to be ready
-        await waitForMinio(access_key, secret_key);
+        // Get the container's Docker bridge IP (backend is also in Docker, so 127.0.0.1 won't work)
+        const containerIP = await getContainerIP(MINIO_NAME);
 
-        // Save connection config
+        // Wait for MinIO to be ready using its bridge IP
+        await waitForMinio(containerIP, access_key, secret_key);
+
+        // Save connection config using the bridge IP
         await executeQuery(
             `INSERT INTO storage_config (id, endpoint, port, access_key, secret_key, region, use_ssl, updated_at)
-             VALUES (1, '127.0.0.1', 9000, $1, $2, 'us-east-1', FALSE, NOW())
+             VALUES (1, $3, 9000, $1, $2, 'us-east-1', FALSE, NOW())
              ON CONFLICT (id) DO UPDATE SET
-                 endpoint = '127.0.0.1', port = 9000,
+                 endpoint = $3, port = 9000,
                  access_key = $1, secret_key = $2,
                  region = 'us-east-1', use_ssl = FALSE, updated_at = NOW()`,
-            [access_key, secret_key]
+            [access_key, secret_key, containerIP]
         );
-        res.json({ ok: true, endpoint: '127.0.0.1', port: 9000 });
+        res.json({ ok: true, endpoint: containerIP, port: 9000 });
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }

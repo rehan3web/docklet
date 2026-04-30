@@ -1,0 +1,28 @@
+root@root:~/docklet# docker ps
+CONTAINER ID   IMAGE                      COMMAND                  CREATED              STATUS                        PORTS                                                                          NAMES
+c712c81badc5   minio/minio                "/usr/bin/docker-ent…"   38 seconds ago       Up 37 seconds                 0.0.0.0:9000-9001->9000-9001/tcp, [::]:9000-9001->9000-9001/tcp                docklet-minio
+339597be86e4   nginx:alpine               "/docker-entrypoint.…"   About a minute ago   Up About a minute             0.0.0.0:80->80/tcp, [::]:80->80/tcp, 0.0.0.0:443->443/tcp, [::]:443->443/tcp   docklet-nginx
+8eb5c3ee7e67   haproxy:alpine             "docker-entrypoint.s…"   About a minute ago   Up About a minute                                                                                            docklet-haproxy
+bfdc701ae6e8   docklet-docklet-client     "/docker-entrypoint.…"   About a minute ago   Up About a minute             0.0.0.0:3000->80/tcp                                                           docklet-client
+8e6bfe351296   docklet-docklet-server     "docker-entrypoint.s…"   About a minute ago   Up About a minute             127.0.0.1:3001->3001/tcp                                                       docklet-server
+165e25854bc2   edoburu/pgbouncer:latest   "/entrypoint.sh /usr…"   About a minute ago   Up About a minute             127.0.0.1:16543->5432/tcp                                                      docklet-pooler
+1adaf93c38e0   postgres:15                "docker-entrypoint.s…"   About a minute ago   Up About a minute (healthy)   127.0.0.1:15432->5432/tcp                                                      docklet-db
+root@root:~/docklet# 
+
+chk logs
+
+Create MinIO Instance
+A MinIO Docker container (docklet-minio) will be created on port 9000 and auto-connected.
+
+Username (Access Key)
+admin
+Password (Secret Key)
+••••••••
+Min 8 characters
+
+Ports 9000 (API) and 9001 (Console) will be bound on the host
+Data persisted at /var/lib/docklet/minio-data
+MinIO did not become ready in time — check Docker logs for errors
+
+Cancel
+Create Instance
