@@ -723,6 +723,24 @@ export async function storageDownloadUrl(bucket: string, key: string): Promise<{
   return apiFetch(`/storage/buckets/${bucket}/files/download?key=${encodeURIComponent(key)}`);
 }
 
+export type StorageInstance = { exists: boolean; running: boolean; dockerAvailable: boolean; id?: string };
+
+export function useGetStorageInstance() {
+  return useQuery({
+    queryKey: ["storage-instance"],
+    queryFn: () => apiFetch<StorageInstance>("/storage/instance"),
+    refetchInterval: 8000,
+  });
+}
+
+export async function storageCreateInstance(access_key: string, secret_key: string): Promise<{ ok: boolean }> {
+  return apiFetch("/storage/instance", { method: "POST", body: JSON.stringify({ access_key, secret_key }) });
+}
+
+export async function storageDestroyInstance(): Promise<{ ok: boolean }> {
+  return apiFetch("/storage/instance", { method: "DELETE" });
+}
+
 export async function storageUploadFile(bucket: string, file: File, key: string, onProgress?: (pct: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const token = localStorage.getItem("nextbase_token");

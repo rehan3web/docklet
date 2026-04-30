@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { Sun, Moon, Database, Plus, Trash2, RefreshCw, Upload, Download, Pencil, Search, X, FolderOpen, File, FileText, FileImage, FileCode, Archive, CheckSquare, Square, ChevronRight, Loader2, Unplug, Link2 } from "lucide-react";
+import { Sun, Moon, Database, Plus, Trash2, RefreshCw, Upload, Download, Pencil, Search, X, FolderOpen, File, FileText, FileImage, FileCode, Archive, CheckSquare, Square, ChevronRight, Loader2, Unplug, Link2, Container, Zap, CheckCircle2, Circle } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,8 +17,10 @@ import { useTheme } from "@/hooks/use-theme";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetStorageConnection, useGetStorageBuckets, useGetStorageFiles,
+  useGetStorageInstance,
   storageConnect, storageDisconnect, storageCreateBucket, storageDeleteBucket,
   storageDeleteFiles, storageRenameFile, storageDownloadUrl, storageUploadFile,
+  storageCreateInstance, storageDestroyInstance,
   type StorageBucket, type StorageFile,
 } from "@/api/client";
 
@@ -111,6 +113,143 @@ function ConnectDialog({ open, onClose, onConnected }: { open: boolean; onClose:
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Create Instance Dialog ────────────────────────────────────────────────────
+type CreateStep = { label: string; status: "pending" | "active" | "done" | "error" };
+
+function CreateInstanceDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [accessKey, setAccessKey] = useState("minioadmin");
+  const [secretKey, setSecretKey] = useState("minioadmin123");
+  const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState<CreateStep[]>([
+    { label: "Pull MinIO image", status: "pending" },
+    { label: "Create & start container", status: "pending" },
+    { label: "Wait for MinIO to be ready", status: "pending" },
+    { label: "Connect storage", status: "pending" },
+  ]);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  function setStep(idx: number, status: CreateStep["status"]) {
+    setSteps(prev => prev.map((s, i) => i === idx ? { ...s, status } : i < idx ? { ...s, status: "done" } : s));
+  }
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    if (secretKey.length < 8) { toast.error("Secret key must be at least 8 characters"); return; }
+    setBusy(true);
+    setErrorMsg("");
+    setSteps(steps.map((s, i) => ({ ...s, status: i === 0 ? "active" : "pending" })));
+
+    // Animate steps while backend processes
+    const ticker = setInterval(() => {
+      setSteps(prev => {
+        const activeIdx = prev.findIndex(s => s.status === "active");
+        if (activeIdx === -1 || activeIdx >= prev.length - 1) return prev;
+        // advance roughly every 8s
+        return prev;
+      });
+    }, 500);
+
+    // Simulate step progression while request is in flight
+    let stepIdx = 0;
+    const advance = () => {
+      stepIdx = Math.min(stepIdx + 1, 3);
+      setStep(stepIdx, "active");
+    };
+    const t1 = setTimeout(advance, 8000);   // image pull done
+    const t2 = setTimeout(advance, 12000);  // container started
+    const t3 = setTimeout(advance, 14000);  // waiting
+
+    try {
+      await storageCreateInstance(accessKey, secretKey);
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearInterval(ticker);
+      setSteps(s => s.map(x => ({ ...x, status: "done" })));
+      await new Promise(r => setTimeout(r, 600));
+      toast.success("MinIO instance created and connected");
+      onCreated();
+      onClose();
+    } catch (err: any) {
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearInterval(ticker);
+      setSteps(prev => prev.map((s, i) => s.status === "active" ? { ...s, status: "error" } : s));
+      setErrorMsg(err.message || "Failed to create instance");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function reset() {
+    setBusy(false);
+    setErrorMsg("");
+    setSteps([
+      { label: "Pull MinIO image", status: "pending" },
+      { label: "Create & start container", status: "pending" },
+      { label: "Wait for MinIO to be ready", status: "pending" },
+      { label: "Connect storage", status: "pending" },
+    ]);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o && !busy) { reset(); onClose(); } }}>
+      <DialogContent className="sm:max-w-[460px]">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-medium flex items-center gap-2">
+            <Container className="w-4 h-4 text-muted-foreground" /> Create MinIO Instance
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            A MinIO Docker container (<code className="font-mono bg-muted px-1 rounded">docklet-minio</code>) will be created on port 9000 and auto-connected.
+          </DialogDescription>
+        </DialogHeader>
+
+        {!busy ? (
+          <form onSubmit={create} className="space-y-4 pt-1">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Username (Access Key)</Label>
+                <Input value={accessKey} onChange={e => setAccessKey(e.target.value)} className="h-8 text-xs font-mono" required />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Password (Secret Key)</Label>
+                <Input type="password" value={secretKey} onChange={e => setSecretKey(e.target.value)} className="h-8 text-xs font-mono" required />
+                <p className="text-[10px] text-muted-foreground">Min 8 characters</p>
+              </div>
+            </div>
+            <div className="rounded-lg bg-muted/40 border border-border px-3 py-2.5 text-xs text-muted-foreground space-y-1">
+              <div className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-primary" /><span>Ports <strong className="text-foreground">9000</strong> (API) and <strong className="text-foreground">9001</strong> (Console) will be bound on the host</span></div>
+              <div className="flex items-center gap-1.5"><Database className="w-3 h-3 text-primary" /><span>Data persisted at <code className="font-mono">/var/lib/docklet/minio-data</code></span></div>
+            </div>
+            {errorMsg && <p className="text-xs text-destructive">{errorMsg}</p>}
+            <DialogFooter>
+              <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Cancel</Button>
+              <Button type="submit" size="sm" className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
+                Create Instance
+              </Button>
+            </DialogFooter>
+          </form>
+        ) : (
+          <div className="py-2 space-y-3">
+            <p className="text-xs text-muted-foreground">This may take a minute while the image is pulled and MinIO starts up.</p>
+            <div className="space-y-2.5">
+              {steps.map((s, i) => (
+                <div key={i} className="flex items-center gap-2.5">
+                  {s.status === "done" && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
+                  {s.status === "active" && <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />}
+                  {s.status === "pending" && <Circle className="w-4 h-4 text-muted-foreground/30 shrink-0" />}
+                  {s.status === "error" && <X className="w-4 h-4 text-destructive shrink-0" />}
+                  <span className={`text-xs ${s.status === "active" ? "text-foreground font-medium" : s.status === "done" ? "text-muted-foreground line-through" : s.status === "error" ? "text-destructive" : "text-muted-foreground/50"}`}>
+                    {s.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {errorMsg && (
+              <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive">{errorMsg}</div>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -249,6 +388,8 @@ export default function StoragePage() {
   const qc = useQueryClient();
   const { data: conn, isLoading: connLoading } = useGetStorageConnection();
   const connected = conn?.connected === true;
+  const { data: instance } = useGetStorageInstance();
+  const isManaged = instance?.running === true;
   const { data: bucketsData, isLoading: bucketsLoading } = useGetStorageBuckets(connected);
 
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
@@ -259,6 +400,7 @@ export default function StoragePage() {
 
   // Dialogs
   const [showConnect, setShowConnect] = useState(false);
+  const [showCreateInstance, setShowCreateInstance] = useState(false);
   const [showCreateBucket, setShowCreateBucket] = useState(false);
   const [bucketName, setBucketName] = useState("");
   const [showUpload, setShowUpload] = useState(false);
@@ -278,6 +420,16 @@ export default function StoragePage() {
       setSelectedBucket(null);
       toast.success("Disconnected");
       refresh();
+    } catch (err: any) { toast.error(err.message); }
+  }
+
+  async function handleDestroyInstance() {
+    try {
+      await storageDestroyInstance();
+      setSelectedBucket(null);
+      toast.success("MinIO instance stopped and removed");
+      refresh();
+      qc.invalidateQueries({ queryKey: ["storage-instance"] });
     } catch (err: any) { toast.error(err.message); }
   }
 
@@ -358,6 +510,11 @@ export default function StoragePage() {
                     {conn.endpoint}:{conn.port}
                   </Badge>
                 )}
+                {isManaged && (
+                  <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 text-emerald-600 bg-emerald-500/10 border-emerald-500/20 dark:text-emerald-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block mr-1" />managed
+                  </Badge>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -368,9 +525,15 @@ export default function StoragePage() {
                 <RefreshCw className="w-3.5 h-3.5 mr-2" />Refresh
               </Button>
               {connected ? (
-                <Button variant="outline" size="sm" className="h-8 rounded-full text-xs text-destructive border-destructive/30 hover:bg-destructive/10" onClick={handleDisconnect}>
-                  <Unplug className="w-3.5 h-3.5 mr-2" />Disconnect
-                </Button>
+                isManaged ? (
+                  <Button variant="outline" size="sm" className="h-8 rounded-full text-xs text-destructive border-destructive/30 hover:bg-destructive/10" onClick={handleDestroyInstance}>
+                    <Trash2 className="w-3.5 h-3.5 mr-2" />Stop Instance
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" className="h-8 rounded-full text-xs text-destructive border-destructive/30 hover:bg-destructive/10" onClick={handleDisconnect}>
+                    <Unplug className="w-3.5 h-3.5 mr-2" />Disconnect
+                  </Button>
+                )
               ) : (
                 <Button size="sm" className="h-8 rounded-full text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={() => setShowConnect(true)}>
                   <Link2 className="w-3.5 h-3.5 mr-2" />Connect
@@ -390,18 +553,51 @@ export default function StoragePage() {
 
           {/* Not connected */}
           {!connLoading && !connected && (
-            <Card className="bg-background border-border shadow-none rounded-xl max-w-md">
-              <CardContent className="p-8 text-center">
-                <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                  <Database className="w-6 h-6 text-muted-foreground" />
-                </div>
-                <h3 className="text-sm font-medium text-foreground mb-1">No storage connected</h3>
-                <p className="text-xs text-muted-foreground mb-5 leading-relaxed">Connect to a MinIO server or any S3-compatible endpoint to manage your buckets and files.</p>
-                <Button size="sm" className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={() => setShowConnect(true)}>
-                  <Link2 className="w-3.5 h-3.5 mr-2" />Connect to MinIO
-                </Button>
-              </CardContent>
-            </Card>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+              {/* Create Instance card */}
+              <Card className="bg-background border-border shadow-none rounded-xl flex flex-col hover:border-primary/30 transition-colors">
+                <CardContent className="p-6 flex flex-col flex-1">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center mb-4">
+                    <Container className="w-5 h-5 text-primary" />
+                  </div>
+                  <h3 className="text-sm font-medium text-foreground mb-1">Create MinIO Instance</h3>
+                  <p className="text-xs text-muted-foreground mb-5 leading-relaxed flex-1">
+                    Launch a MinIO Docker container directly on this server. Set a username and password, and the panel handles the rest.
+                  </p>
+                  <div className="space-y-1.5 mb-5 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />Auto-pulls MinIO image</div>
+                    <div className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />Port 9000 (API) + 9001 (Console)</div>
+                    <div className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />Data persisted on disk</div>
+                    <div className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />Auto-connects when ready</div>
+                  </div>
+                  <Button size="sm" className="h-8 text-xs w-full border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={() => setShowCreateInstance(true)}>
+                    <Container className="w-3.5 h-3.5 mr-2" />Create Instance
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Connect Existing card */}
+              <Card className="bg-background border-border shadow-none rounded-xl flex flex-col hover:border-primary/30 transition-colors">
+                <CardContent className="p-6 flex flex-col flex-1">
+                  <div className="w-10 h-10 rounded-lg bg-muted border border-border flex items-center justify-center mb-4">
+                    <Link2 className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-sm font-medium text-foreground mb-1">Connect Existing</h3>
+                  <p className="text-xs text-muted-foreground mb-5 leading-relaxed flex-1">
+                    Connect to an already-running MinIO server or any S3-compatible endpoint (AWS S3, Backblaze B2, Cloudflare R2, etc.).
+                  </p>
+                  <div className="space-y-1.5 mb-5 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />Custom endpoint & port</div>
+                    <div className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />SSL / HTTPS support</div>
+                    <div className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />Any S3-compatible service</div>
+                    <div className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />Test connection before saving</div>
+                  </div>
+                  <Button variant="outline" size="sm" className="h-8 text-xs w-full" onClick={() => setShowConnect(true)}>
+                    <Link2 className="w-3.5 h-3.5 mr-2" />Connect to Existing
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
           )}
 
           {/* Connected: split layout */}
@@ -575,6 +771,7 @@ export default function StoragePage() {
 
       {/* Dialogs */}
       <ConnectDialog open={showConnect} onClose={() => setShowConnect(false)} onConnected={refresh} />
+      <CreateInstanceDialog open={showCreateInstance} onClose={() => setShowCreateInstance(false)} onCreated={() => { refresh(); qc.invalidateQueries({ queryKey: ["storage-instance"] }); }} />
 
       <Dialog open={showCreateBucket} onOpenChange={(o) => { if (!o) setShowCreateBucket(false); }}>
         <DialogContent className="sm:max-w-[360px]">

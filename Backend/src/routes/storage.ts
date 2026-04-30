@@ -1,4 +1,6 @@
 import express from 'express';
+import fs from 'fs';
+import Docker from 'dockerode';
 import { authenticateToken } from '../middleware/auth';
 import { executeQuery } from '../lib/db';
 import {
@@ -237,4 +239,120 @@ router.get('/buckets/:bucket/files/download', async (req, res) => {
     } catch (err: any) { res.status(500).json({ message: err.message }); }
 });
 
+// ── MinIO Instance Management ─────────────────────────────────────────────────
+const MINIO_IMAGE = 'minio/minio:latest';
+const MINIO_NAME = 'docklet-minio';
+const MINIO_DATA = '/var/lib/docklet/minio-data';
+
+let _docker: Docker | null = null;
+function getDocker(): Docker {
+    if (!_docker) _docker = new Docker({ socketPath: '/var/run/docker.sock' });
+    return _docker;
+}
+function dockerOk(): boolean {
+    return fs.existsSync('/var/run/docker.sock');
+}
+
+function pullImage(tag: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        getDocker().pull(tag, (err: any, stream: any) => {
+            if (err) return reject(err);
+            getDocker().modem.followProgress(stream, (e: any) => e ? reject(e) : resolve());
+        });
+    });
+}
+
+async function waitForMinio(accessKey: string, secretKey: string, retries = 15): Promise<void> {
+    const cfg = { endpoint: '127.0.0.1', port: 9000, access_key: accessKey, secret_key: secretKey, region: 'us-east-1', use_ssl: false };
+    for (let i = 0; i < retries; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+            await buildClient(cfg).send(new ListBucketsCommand({}));
+            return;
+        } catch { /* not ready yet */ }
+    }
+    throw new Error('MinIO did not become ready in time — check Docker logs for errors');
+}
+
+// GET /storage/instance — status of the managed MinIO container
+router.get('/instance', async (_req, res) => {
+    if (!dockerOk()) return res.json({ exists: false, running: false, dockerAvailable: false });
+    try {
+        const info = await getDocker().getContainer(MINIO_NAME).inspect();
+        res.json({ exists: true, running: info.State.Running, id: info.Id.slice(0, 12), dockerAvailable: true });
+    } catch {
+        res.json({ exists: false, running: false, dockerAvailable: true });
+    }
+});
+
+// POST /storage/instance — create & start MinIO, then auto-connect
+router.post('/instance', async (req, res) => {
+    const { access_key, secret_key } = req.body;
+    if (!access_key || !secret_key)
+        return res.status(400).json({ message: 'access_key and secret_key are required' });
+    if (secret_key.length < 8)
+        return res.status(400).json({ message: 'Secret key must be at least 8 characters' });
+    if (!dockerOk())
+        return res.status(503).json({ message: 'Docker is not available on this host' });
+
+    try {
+        // Remove any existing container with same name
+        try {
+            await getDocker().getContainer(MINIO_NAME).remove({ force: true });
+        } catch { /* didn't exist */ }
+
+        // Pull image (no-op if already present)
+        await pullImage(MINIO_IMAGE);
+
+        // Create data dir
+        try { fs.mkdirSync(MINIO_DATA, { recursive: true }); } catch { /* ignore */ }
+
+        // Create and start container
+        const container = await getDocker().createContainer({
+            Image: 'minio/minio',
+            name: MINIO_NAME,
+            Cmd: ['server', '/data', '--console-address', ':9001'],
+            Env: [`MINIO_ROOT_USER=${access_key}`, `MINIO_ROOT_PASSWORD=${secret_key}`],
+            ExposedPorts: { '9000/tcp': {}, '9001/tcp': {} },
+            HostConfig: {
+                PortBindings: {
+                    '9000/tcp': [{ HostPort: '9000' }],
+                    '9001/tcp': [{ HostPort: '9001' }],
+                },
+                Binds: [`${MINIO_DATA}:/data`],
+                RestartPolicy: { Name: 'unless-stopped' },
+            },
+        });
+        await container.start();
+
+        // Wait for MinIO to be ready
+        await waitForMinio(access_key, secret_key);
+
+        // Save connection config
+        await executeQuery(
+            `INSERT INTO storage_config (id, endpoint, port, access_key, secret_key, region, use_ssl, updated_at)
+             VALUES (1, '127.0.0.1', 9000, $1, $2, 'us-east-1', FALSE, NOW())
+             ON CONFLICT (id) DO UPDATE SET
+                 endpoint = '127.0.0.1', port = 9000,
+                 access_key = $1, secret_key = $2,
+                 region = 'us-east-1', use_ssl = FALSE, updated_at = NOW()`,
+            [access_key, secret_key]
+        );
+        res.json({ ok: true, endpoint: '127.0.0.1', port: 9000 });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// DELETE /storage/instance — stop and remove the managed MinIO container
+router.delete('/instance', async (_req, res) => {
+    if (!dockerOk()) return res.status(503).json({ message: 'Docker not available' });
+    try {
+        await getDocker().getContainer(MINIO_NAME).remove({ force: true });
+    } catch { /* already gone */ }
+    await executeQuery('DELETE FROM storage_config WHERE id = 1');
+    res.json({ ok: true });
+});
+
 export default router;
+
