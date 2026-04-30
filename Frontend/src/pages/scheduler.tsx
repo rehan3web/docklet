@@ -90,10 +90,10 @@ function TaskLogsDialog({ task, open, onClose }: { task: ScheduledTask; open: bo
                     <span className="font-mono text-[10px] text-muted-foreground">#{run.id}</span>
                     <RunStatusBadge status={run.status} />
                   </div>
-                  <p className="font-mono text-[10px] text-muted-foreground">{format(new Date(run.started_at), "MMM dd, HH:mm:ss")}</p>
+                  <p className="font-mono text-[10px] text-muted-foreground">{format(new Date(Number(run.started_at)), "MMM dd, HH:mm:ss")}</p>
                   {run.finished_at && (
                     <p className="font-mono text-[10px] text-muted-foreground/60">
-                      {((run.finished_at - run.started_at) / 1000).toFixed(1)}s
+                      {((Number(run.finished_at) - Number(run.started_at)) / 1000).toFixed(1)}s
                     </p>
                   )}
                 </button>

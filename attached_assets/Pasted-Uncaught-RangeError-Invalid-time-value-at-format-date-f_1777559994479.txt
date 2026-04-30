@@ -1,0 +1,122 @@
+Uncaught RangeError: Invalid time value
+    at format (date-fns.js?v=70df83a5:2295:11)
+    at scheduler.tsx:180:115
+    at Array.map (<anonymous>)
+    at TaskLogsDialog (scheduler.tsx:154:14)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=70df83a5:11548:26)
+    at updateFunctionComponent (chunk-RPCDYKBN.js?v=70df83a5:14582:28)
+    at beginWork (chunk-RPCDYKBN.js?v=70df83a5:15924:22)
+    at beginWork$1 (chunk-RPCDYKBN.js?v=70df83a5:19753:22)
+    at performUnitOfWork (chunk-RPCDYKBN.js?v=70df83a5:19198:20)
+    at workLoopSync (chunk-RPCDYKBN.js?v=70df83a5:19137:13)Understand this error
+date-fns.js?v=70df83a5:2295 Uncaught RangeError: Invalid time value
+    at format (date-fns.js?v=70df83a5:2295:11)
+    at scheduler.tsx:93:79
+    at Array.map (<anonymous>)
+    at TaskLogsDialog (scheduler.tsx:83:21)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=70df83a5:11548:26)
+    at mountIndeterminateComponent (chunk-RPCDYKBN.js?v=70df83a5:14926:21)
+    at beginWork (chunk-RPCDYKBN.js?v=70df83a5:15914:22)
+    at HTMLUnknownElement.callCallback2 (chunk-RPCDYKBN.js?v=70df83a5:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-RPCDYKBN.js?v=70df83a5:3699:24)
+    at invokeGuardedCallback (chunk-RPCDYKBN.js?v=70df83a5:3733:39)
+format @ date-fns.js?v=70df83a5:2295
+(anonymous) @ scheduler.tsx:93
+TaskLogsDialog @ scheduler.tsx:83
+renderWithHooks @ chunk-RPCDYKBN.js?v=70df83a5:11548
+mountIndeterminateComponent @ chunk-RPCDYKBN.js?v=70df83a5:14926
+beginWork @ chunk-RPCDYKBN.js?v=70df83a5:15914
+callCallback2 @ chunk-RPCDYKBN.js?v=70df83a5:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=70df83a5:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=70df83a5:3733
+beginWork$1 @ chunk-RPCDYKBN.js?v=70df83a5:19765
+performUnitOfWork @ chunk-RPCDYKBN.js?v=70df83a5:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=70df83a5:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=70df83a5:19116
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=70df83a5:18874
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=70df83a5:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=70df83a5:18627Understand this error
+date-fns.js?v=70df83a5:2295 Uncaught RangeError: Invalid time value
+    at format (date-fns.js?v=70df83a5:2295:11)
+    at scheduler.tsx:93:79
+    at Array.map (<anonymous>)
+    at TaskLogsDialog (scheduler.tsx:83:21)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=70df83a5:11548:26)
+    at mountIndeterminateComponent (chunk-RPCDYKBN.js?v=70df83a5:14926:21)
+    at beginWork (chunk-RPCDYKBN.js?v=70df83a5:15914:22)
+    at HTMLUnknownElement.callCallback2 (chunk-RPCDYKBN.js?v=70df83a5:3674:22)
+    at Object.invokeGuardedCallbackDev (chunk-RPCDYKBN.js?v=70df83a5:3699:24)
+    at invokeGuardedCallback (chunk-RPCDYKBN.js?v=70df83a5:3733:39)
+format @ date-fns.js?v=70df83a5:2295
+(anonymous) @ scheduler.tsx:93
+TaskLogsDialog @ scheduler.tsx:83
+renderWithHooks @ chunk-RPCDYKBN.js?v=70df83a5:11548
+mountIndeterminateComponent @ chunk-RPCDYKBN.js?v=70df83a5:14926
+beginWork @ chunk-RPCDYKBN.js?v=70df83a5:15914
+callCallback2 @ chunk-RPCDYKBN.js?v=70df83a5:3674
+invokeGuardedCallbackDev @ chunk-RPCDYKBN.js?v=70df83a5:3699
+invokeGuardedCallback @ chunk-RPCDYKBN.js?v=70df83a5:3733
+beginWork$1 @ chunk-RPCDYKBN.js?v=70df83a5:19765
+performUnitOfWork @ chunk-RPCDYKBN.js?v=70df83a5:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=70df83a5:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=70df83a5:19116
+recoverFromConcurrentError @ chunk-RPCDYKBN.js?v=70df83a5:18736
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=70df83a5:18879
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=70df83a5:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=70df83a5:18627Understand this error
+chunk-RPCDYKBN.js?v=70df83a5:14032 The above error occurred in the <TaskLogsDialog> component:
+
+    at TaskLogsDialog (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/src/pages/scheduler.tsx?t=1777559947264:116:27)
+    at div
+    at SchedulerPage (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/src/pages/scheduler.tsx?t=1777559947264:832:29)
+    at PrivateRoute (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/src/App.tsx?t=1777559762789:43:36)
+    at Route (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/node_modules/.vite/deps/wouter.js?v=70df83a5:226:16)
+    at Switch (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/node_modules/.vite/deps/wouter.js?v=70df83a5:283:17)
+    at Router
+    at Router (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/node_modules/.vite/deps/wouter.js?v=70df83a5:180:17)
+    at Provider (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/node_modules/.vite/deps/chunk-3EXHYFPC.js?v=70df83a5:56:15)
+    at TooltipProvider (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=70df83a5:184:5)
+    at QueryClientProvider (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/node_modules/.vite/deps/@tanstack_react-query.js?v=70df83a5:3194:3)
+    at ThemeProvider (https://6b4f189a-4955-4774-bb3c-9d56801e2028-00-wgkk6yxxn07n.pike.replit.dev/src/hooks/use-theme.tsx:24:33)
+    at App
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+logCapturedError @ chunk-RPCDYKBN.js?v=70df83a5:14032
+update.callback @ chunk-RPCDYKBN.js?v=70df83a5:14052
+callCallback @ chunk-RPCDYKBN.js?v=70df83a5:11248
+commitUpdateQueue @ chunk-RPCDYKBN.js?v=70df83a5:11265
+commitLayoutEffectOnFiber @ chunk-RPCDYKBN.js?v=70df83a5:17093
+commitLayoutMountEffects_complete @ chunk-RPCDYKBN.js?v=70df83a5:17980
+commitLayoutEffects_begin @ chunk-RPCDYKBN.js?v=70df83a5:17969
+commitLayoutEffects @ chunk-RPCDYKBN.js?v=70df83a5:17920
+commitRootImpl @ chunk-RPCDYKBN.js?v=70df83a5:19353
+commitRoot @ chunk-RPCDYKBN.js?v=70df83a5:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=70df83a5:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=70df83a5:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=70df83a5:18627Understand this error
+chunk-RPCDYKBN.js?v=70df83a5:9129 Uncaught RangeError: Invalid time value
+    at format (date-fns.js?v=70df83a5:2295:11)
+    at scheduler.tsx:93:79
+    at Array.map (<anonymous>)
+    at TaskLogsDialog (scheduler.tsx:83:21)
+    at renderWithHooks (chunk-RPCDYKBN.js?v=70df83a5:11548:26)
+    at mountIndeterminateComponent (chunk-RPCDYKBN.js?v=70df83a5:14926:21)
+    at beginWork (chunk-RPCDYKBN.js?v=70df83a5:15914:22)
+    at beginWork$1 (chunk-RPCDYKBN.js?v=70df83a5:19753:22)
+    at performUnitOfWork (chunk-RPCDYKBN.js?v=70df83a5:19198:20)
+    at workLoopSync (chunk-RPCDYKBN.js?v=70df83a5:19137:13)
+format @ date-fns.js?v=70df83a5:2295
+(anonymous) @ scheduler.tsx:93
+TaskLogsDialog @ scheduler.tsx:83
+renderWithHooks @ chunk-RPCDYKBN.js?v=70df83a5:11548
+mountIndeterminateComponent @ chunk-RPCDYKBN.js?v=70df83a5:14926
+beginWork @ chunk-RPCDYKBN.js?v=70df83a5:15914
+beginWork$1 @ chunk-RPCDYKBN.js?v=70df83a5:19753
+performUnitOfWork @ chunk-RPCDYKBN.js?v=70df83a5:19198
+workLoopSync @ chunk-RPCDYKBN.js?v=70df83a5:19137
+renderRootSync @ chunk-RPCDYKBN.js?v=70df83a5:19116
+recoverFromConcurrentError @ chunk-RPCDYKBN.js?v=70df83a5:18736
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=70df83a5:18879
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=70df83a5:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=70df83a5:18627Understand this error
