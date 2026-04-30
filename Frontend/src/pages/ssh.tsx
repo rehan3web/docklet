@@ -9,13 +9,22 @@ import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { ModeToggle } from "@/components/mode-toggle";
 import { getSocket } from "@/api/socket";
 
-// Strip ANSI escape codes so raw PTY output renders as clean text.
+// Strip ANSI / VT100 escape sequences so raw PTY output renders as clean text.
 function stripAnsi(str: string) {
   return str
-    .replace(/\x1B\[[0-9;]*[A-Za-z]/g, "")
-    .replace(/\x1B\][^\x07]*\x07/g, "")
-    .replace(/\x1B[()][A-Z0-9]/g, "")
-    .replace(/\x1B[^[\]()]/g, "")
+    // CSI sequences: ESC [ <param bytes> <intermediate bytes> <final byte>
+    // Covers: ESC[...m  ESC[?2004h  ESC[>4;2m  ESC[!p  etc.
+    .replace(/\x1B\[[\x20-\x3F]*[\x40-\x7E]/g, "")
+    // OSC sequences: ESC ] ... BEL  or  ESC ] ... ESC \
+    .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, "")
+    // DCS / PM / APC / SOS: ESC P/^/_ ... ESC \
+    .replace(/\x1B[P^_][^\x1B]*\x1B\\/g, "")
+    // Two-character escape sequences: ESC followed by one char (charset, etc.)
+    .replace(/\x1B[^\[^\]P^_]/g, "")
+    // Lone ESC
+    .replace(/\x1B/g, "")
+    // Non-printable control chars (null, bell, BS, shift-in/out, etc.)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1A\x1C-\x1F]/g, "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n");
 }
@@ -329,6 +338,10 @@ export default function SshPage() {
               <input
                 ref={hiddenInputRef}
                 onKeyDown={handleKey}
+                onChange={() => {
+                  // keep input empty so characters don't accumulate in the field
+                  if (hiddenInputRef.current) hiddenInputRef.current.value = "";
+                }}
                 onFocus={() => setTermFocused(true)}
                 onBlur={() => setTermFocused(false)}
                 className="sr-only"
@@ -336,7 +349,6 @@ export default function SshPage() {
                 autoCorrect="off"
                 autoCapitalize="off"
                 spellCheck={false}
-                readOnly
                 aria-label="SSH terminal input"
               />
 
