@@ -1,0 +1,82 @@
+Build a complete S3-compatible storage management system using MinIO for a DevOps panel (Docklet-like platform).
+________________________________________
+Core Requirements
+Carete Bucket Stoarge________________________________________
+2.	Bucket Management
+o	User can:
+	Create new bucket
+	View all buckets
+	Delete bucket
+	Open bucket to manage files
+________________________________________
+3.	File Management (Full S3 Functionality)
+Inside each bucket user can:
+o	Upload files (manual upload via UI)
+o	Upload supported file types:
+	Images (jpg, png, webp)
+	Text files (txt, json)
+	Documents (pdf, docx)
+	Other common formats
+o	View files (list with size, type, date)
+o	Download files
+o	Delete:
+	Single file
+	Multiple selected files
+	Delete all files in bucket
+o	Rename files
+o	Replace/update files
+________________________________________
+4.	Advanced Features
+o	Multi-select file actions
+o	Drag & drop upload
+o	Progress bar for uploads
+o	Real-time file list refresh
+o	Search & filter files
+________________________________________
+5.	Security
+o	Store credentials securely (encrypted)
+o	Do NOT expose secret keys in frontend
+o	Use backend proxy for all S3 operations
+________________________________________
+6.	Backend (Docker-based)
+o	Backend runs inside Docker container
+o	Use Node.js with AWS SDK (S3 compatible)
+o	Connect to MinIO using custom endpoint
+Example connection:
+const AWS = require("aws-sdk");
+
+const s3 = new AWS.S3({
+  endpoint: "http://minio:9000",
+  accessKeyId: process.env.S3_ACCESS_KEY,
+  secretAccessKey: process.env.S3_SECRET_KEY,
+  s3ForcePathStyle: true,
+  signatureVersion: "v4",
+});
+________________________________________
+7.	API Endpoints (Required)
+•	POST /storage/connect
+•	GET /buckets
+•	POST /buckets/create
+•	DELETE /buckets/delete
+•	GET /files
+•	POST /files/upload
+•	DELETE /files/delete
+•	PUT /files/rename
+________________________________________
+8.	Frontend UI (Modern SaaS Style)
+•	Sidebar → “Storage”
+•	Bucket list view
+•	File explorer UI (like cloud storage)
+•	Upload button + drag drop
+•	Multi-select checkboxes
+•	Actions toolbar (delete, rename, download)
+________________________________________
+9.	Optional Enhancements
+•	Public/private bucket toggle
+•	Generate public file URL
+•	Signed URL support
+•	Usage stats (storage size)
+________________________________________
+Goal
+Create a fully functional, production-ready S3 storage system similar to AWS S3 dashboard but integrated into a custom DevOps panel using MinIO and Docker.
+

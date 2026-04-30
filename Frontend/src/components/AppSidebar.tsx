@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Menu, LogOut, Server, Terminal, Container, GitBranch, Globe, PlugZap, Clock } from "lucide-react";
+import { Menu, LogOut, Server, Terminal, Container, GitBranch, Globe, PlugZap, Clock, Database } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -112,6 +112,7 @@ const navItems: NavItem[] = [
     { label: "Auto Deploy", icon: <GitBranch className="w-4 h-4" strokeWidth={1.5} />, href: "/deploy" },
     { label: "Reverse Proxy", icon: <Globe className="w-4 h-4" strokeWidth={1.5} />, href: "/proxy" },
     { label: "Scheduler", icon: <Clock className="w-4 h-4" strokeWidth={1.5} />, href: "/scheduler" },
+    { label: "Storage", icon: <Database className="w-4 h-4" strokeWidth={1.5} />, href: "/storage" },
 ];
 
 function NavLink({ item, onSelect }: { item: NavItem; onSelect?: () => void }) {
@@ -161,6 +162,7 @@ function SidebarNav({ onSelect }: { onSelect?: () => void }) {
             <NavLink item={navItems[10]} onSelect={onSelect} />
             <NavLink item={navItems[11]} onSelect={onSelect} />
             <NavLink item={navItems[12]} onSelect={onSelect} />
+            <NavLink item={navItems[13]} onSelect={onSelect} />
         </nav>
     );
 }

@@ -660,3 +660,81 @@ export function useGetTaskRuns(taskId: number | null) {
     refetchInterval: 3000,
   });
 }
+
+// ── S3 / MinIO Storage ────────────────────────────────────────────────────────
+
+export type StorageBucket = { name: string; createdAt: string };
+export type StorageFile = { key: string; size: number; lastModified: string; etag: string };
+export type StorageConnection = { connected: boolean; endpoint?: string; port?: number; region?: string; use_ssl?: boolean };
+
+export function useGetStorageConnection() {
+  return useQuery({
+    queryKey: ["storage-connection"],
+    queryFn: () => apiFetch<StorageConnection>("/storage/connection"),
+    refetchInterval: 10000,
+  });
+}
+
+export function useGetStorageBuckets(enabled: boolean) {
+  return useQuery({
+    queryKey: ["storage-buckets"],
+    queryFn: () => apiFetch<{ buckets: StorageBucket[] }>("/storage/buckets"),
+    enabled,
+    refetchInterval: 10000,
+  });
+}
+
+export function useGetStorageFiles(bucket: string | null, prefix = "") {
+  return useQuery({
+    queryKey: ["storage-files", bucket, prefix],
+    queryFn: () => apiFetch<{ files: StorageFile[] }>(`/storage/buckets/${bucket}/files?prefix=${encodeURIComponent(prefix)}`),
+    enabled: !!bucket,
+    refetchInterval: 10000,
+  });
+}
+
+export async function storageConnect(payload: {
+  endpoint: string; port: number; access_key: string; secret_key: string; region: string; use_ssl: boolean;
+}): Promise<{ ok: boolean }> {
+  return apiFetch("/storage/connect", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function storageDisconnect(): Promise<{ ok: boolean }> {
+  return apiFetch("/storage/connection", { method: "DELETE" });
+}
+
+export async function storageCreateBucket(name: string): Promise<{ ok: boolean }> {
+  return apiFetch("/storage/buckets", { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export async function storageDeleteBucket(name: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/storage/buckets/${name}`, { method: "DELETE" });
+}
+
+export async function storageDeleteFiles(bucket: string, keys: string[]): Promise<{ ok: boolean }> {
+  return apiFetch(`/storage/buckets/${bucket}/files`, { method: "DELETE", body: JSON.stringify({ keys }) });
+}
+
+export async function storageRenameFile(bucket: string, oldKey: string, newKey: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/storage/buckets/${bucket}/files/rename`, { method: "PUT", body: JSON.stringify({ oldKey, newKey }) });
+}
+
+export async function storageDownloadUrl(bucket: string, key: string): Promise<{ url: string }> {
+  return apiFetch(`/storage/buckets/${bucket}/files/download?key=${encodeURIComponent(key)}`);
+}
+
+export async function storageUploadFile(bucket: string, file: File, key: string, onProgress?: (pct: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const token = localStorage.getItem("nextbase_token");
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("key", key);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/storage/buckets/${bucket}/files`);
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100)); };
+    xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) resolve(); else reject(new Error(xhr.responseText)); };
+    xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.send(fd);
+  });
+}
