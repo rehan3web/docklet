@@ -134,56 +134,54 @@ export default function DeployPage() {
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Logs */}
-            <div className="lg:col-span-2">
-              <Card className="bg-background border-border shadow-none rounded-xl overflow-hidden">
-                <CardHeader className="p-4 pb-3 border-b border-border/50 flex-row items-center justify-between">
-                  <div>
-                    <CardTitle className="text-sm font-medium tracking-tight">Live Logs</CardTitle>
-                    <CardDescription className="text-xs text-muted-foreground">{activeId ? `Deployment ${activeId.slice(-8)}` : "Run a deploy to stream logs here"}</CardDescription>
-                  </div>
-                  {activeStatus && <DeployStatusBadge status={activeStatus} />}
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div ref={logRef} className="bg-[#f8f8f8] dark:bg-[#0d0d0d] border-t border-[#e8e8e8] dark:border-transparent font-mono text-xs p-4 h-[460px] overflow-y-auto whitespace-pre-wrap">
-                    {logs.length === 0 ? (
-                      <span className="text-muted-foreground">No logs yet. Logs will appear here in real time during deployment.</span>
-                    ) : (
-                      logs.map((line, i) => (
-                        <div key={i} className={
-                          line.stream === "stderr" ? "text-red-500 dark:text-red-400" :
-                          line.stream === "system" ? "text-[#0369a1] dark:text-cyan-400" :
-                          "text-[#166534] dark:text-green-400"
-                        }>
-                          {line.text}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+          <div className="flex flex-col gap-6">
+            {/* Live Logs — full width, top */}
+            <Card className="bg-background border-border shadow-none rounded-xl overflow-hidden">
+              <CardHeader className="p-4 pb-3 border-b border-border/50 flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm font-medium tracking-tight">Live Logs</CardTitle>
+                  <CardDescription className="text-xs text-muted-foreground">{activeId ? `Deployment ${activeId.slice(-8)}` : "Run a deploy to stream logs here"}</CardDescription>
+                </div>
+                {activeStatus && <DeployStatusBadge status={activeStatus} />}
+              </CardHeader>
+              <CardContent className="p-0">
+                <div ref={logRef} className="bg-[#f8f8f8] dark:bg-[#0d0d0d] border-t border-[#e8e8e8] dark:border-transparent font-mono text-xs p-4 h-[420px] overflow-y-auto whitespace-pre-wrap">
+                  {logs.length === 0 ? (
+                    <span className="text-muted-foreground">No logs yet. Logs will appear here in real time during deployment.</span>
+                  ) : (
+                    logs.map((line, i) => (
+                      <div key={i} className={
+                        line.stream === "stderr" ? "text-red-500 dark:text-red-400" :
+                        line.stream === "system" ? "text-[#0369a1] dark:text-cyan-400" :
+                        "text-[#166534] dark:text-green-400"
+                      }>
+                        {line.text}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
 
-            {/* Deploy history */}
+            {/* Deploy History — full width, bottom */}
             <Card className="bg-background border-border shadow-none rounded-xl">
               <CardHeader className="p-4 pb-2">
                 <CardTitle className="text-sm font-medium tracking-tight">Deploy History</CardTitle>
                 <CardDescription className="text-xs text-muted-foreground">Recent deployments — click to view logs</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
-                <ScrollArea className="h-[460px]">
-                  <div className="p-2 space-y-1">
+                <ScrollArea className="w-full">
+                  <div className="p-2 flex flex-row flex-wrap gap-2">
                     {(deploys?.deployments || []).length === 0 ? (
-                      <p className="text-xs text-muted-foreground p-4 text-center">No deployments yet</p>
+                      <p className="text-xs text-muted-foreground p-4">No deployments yet</p>
                     ) : (
                       (deploys?.deployments || []).slice().reverse().map((d) => (
                         <button
                           key={d.id}
                           onClick={() => loadDeploymentHistory(d.id)}
-                          className={`w-full text-left p-3 rounded-md hover:bg-muted/60 transition-colors border ${activeId === d.id ? 'bg-muted/40 border-border' : 'border-transparent'}`}
+                          className={`text-left p-3 rounded-md hover:bg-muted/60 transition-colors border w-full sm:w-[260px] shrink-0 ${activeId === d.id ? 'bg-muted/40 border-border' : 'border-transparent hover:border-border/40'}`}
                         >
-                          <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center justify-between mb-1 gap-2">
                             <span className="font-mono text-xs text-foreground truncate">{d.name}</span>
                             <DeployStatusBadge status={d.status} />
                           </div>
@@ -193,7 +191,7 @@ export default function DeployPage() {
                               :{d.hostPort} → :{d.containerPort}
                             </p>
                           )}
-                          <p className="font-mono text-[10px] text-muted-foreground">{format(new Date(d.startedAt), "MMM dd, HH:mm:ss")}</p>
+                          <p className="font-mono text-[10px] text-muted-foreground mt-0.5">{format(new Date(d.startedAt), "MMM dd, HH:mm:ss")}</p>
                         </button>
                       ))
                     )}
