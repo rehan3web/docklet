@@ -1,0 +1,164 @@
+name: docklet
+
+# ══════════════════════════════════════════════════════════════════
+#  All credentials are read from .env in the same directory.
+#  Copy .env.example → .env and fill in your values, then run:
+#  docker compose -f postgres.yml up -d --build
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  postgres:
+    container_name: docklet-db
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB:       ${DB_NAME}
+    ports:
+      - "127.0.0.1:15432:5432"   # local-only; haproxy proxy serves public :5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgbouncer:
+    container_name: docklet-pooler
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:16543:5432"   # local-only; haproxy proxy serves public :6543
+    environment:
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_USER:     ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME:     ${DB_NAME}
+      POOL_MODE:   transaction
+      MAX_CLIENT_CONN:   1000
+      DEFAULT_POOL_SIZE: 10
+      AUTH_TYPE:   scram-sha-256
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,search_path
+
+  # ── HAProxy TCP proxy — started by "Expose Public" button ──────────────────
+  # Built from Proxy/Dockerfile which bakes haproxy.cfg into the image.
+  # HAProxy finds its config at the default path — no entrypoint override needed.
+  docklet-proxy:
+    container_name: docklet-proxy
+    build:
+      context: ./Proxy
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:5432:5432"   # direct postgres (public)
+      - "0.0.0.0:6543:6543"   # pgbouncer pooler (public)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    profiles:
+      - expose
+
+  docklet-server:
+    container_name: docklet-server
+    build:
+      context: ./Backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+    environment:
+      # ── PostgreSQL connection — connects to the pooler for best performance ──────
+      PGHOST:     pgbouncer
+      PGPORT:     5432
+      PGUSER:     ${DB_USERNAME}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: ${DB_NAME}
+      # ── Docklet admin credentials ────────────────────────────────
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      JWT_SECRET:     ${JWT_SECRET}
+      PORT: 3001
+      # ── Reverse Proxy ────────────────────────────────────────────
+      SELF_CONTAINER_NAME: docklet-server
+      NGINX_CONTAINER_NAME: docklet-nginx
+    volumes:
+      # Docker socket — required for pg_dump via docker exec
+      - /var/run/docker.sock:/var/run/docker.sock
+      # postgres.yml config — mounted for reference
+      - ./postgres.yml:/config/postgres.yml
+      # .env file — mounted so backend can read variable names if needed
+      - ./.env:/config/.env
+      # Proxy directory — mounted so the backend can build the proxy image
+      - ./Proxy:/config/Proxy
+      # Persistent backups directory
+      - ./backups:/usr/src/app/backups
+      # Reverse Proxy — nginx configs (written by backend, read by nginx)
+      - ./nginx-configs:/usr/src/app/nginx-configs
+      # Reverse Proxy — Let's Encrypt certs (written by certbot via --volumes-from)
+      - ./letsencrypt:/etc/letsencrypt
+      # Reverse Proxy — certbot ACME webroot challenge dir
+      - ./certbot-webroot:/var/www/certbot
+      # HAProxy config — backend writes this file, HAProxy reads it
+      - ./docklet-proxy.cfg:/usr/src/app/docklet-proxy.cfg
+
+  docklet-client:
+    container_name: docklet-client
+    build:
+      context: ./Frontend
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:3000:80"
+    depends_on:
+      - docklet-server
+
+  # ── HAProxy reverse-proxy for auto-deployed app containers ─────────────────
+  # No external ports — nginx reaches it directly by container name on the
+  # default network. Backend writes docklet-proxy.cfg and reloads via SIGUSR2.
+  docklet-haproxy:
+    container_name: docklet-haproxy
+    image: haproxy:alpine
+    restart: unless-stopped
+    volumes:
+      - ./docklet-proxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+    networks:
+      - default
+      - apps
+    depends_on:
+      - docklet-server
+
+  # ── Nginx reverse proxy — domain → HAProxy container, managed by Docklet ──
+  # Bridge networking so proxy_pass http://docklet-haproxy:<port> resolves via
+  # Docker DNS. Ports 80/443 mapped to host for public HTTPS + ACME challenges.
+  # Configs auto-written by the backend; certs at ./letsencrypt/.
+  docklet-nginx:
+    container_name: docklet-nginx
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-configs:/etc/nginx/conf.d:ro
+      - ./letsencrypt:/etc/letsencrypt:ro
+      - ./certbot-webroot:/var/www/certbot:ro
+    networks:
+      - default
+    depends_on:
+      - docklet-server
+
+volumes:
+  pgdata:
+
+networks:
+  apps:
+    name: docklet-apps
