@@ -45,25 +45,31 @@ export default function SshPage() {
     }
   }, [output]);
 
-  // Register socket listeners once
+  // Ensure we always have a live socket and register listeners on it
+  function ensureSocket() {
+    let s = socketRef.current;
+    if (s && (s.connected || s.active)) return s;
+    // existing socket is dead — get/create a fresh one
+    s = getSocket();
+    socketRef.current = s;
+    // re-attach SSH listeners to the new socket instance
+    s.off("ssh:ready").off("ssh:output").off("ssh:error").off("ssh:closed");
+    s.on("ssh:ready", () => setStatus("connected"));
+    s.on("ssh:output", ({ data }: { data: string }) => setOutput(prev => prev + data));
+    s.on("ssh:error", ({ message }: { message: string }) => { setStatus("error"); setErrorMsg(message); });
+    s.on("ssh:closed", () => { setStatus("idle"); setOutput(prev => prev + "\n\n[SSH session closed]\n"); });
+    return s;
+  }
+
+  // Register socket listeners on mount
   useEffect(() => {
     const socket = getSocket();
     socketRef.current = socket;
 
-    const onReady = () => {
-      setStatus("connected");
-    };
-    const onOutput = ({ data }: { data: string }) => {
-      setOutput(prev => prev + data);
-    };
-    const onError = ({ message }: { message: string }) => {
-      setStatus("error");
-      setErrorMsg(message);
-    };
-    const onClosed = () => {
-      setStatus("idle");
-      setOutput(prev => prev + "\n\n[SSH session closed]\n");
-    };
+    const onReady = () => setStatus("connected");
+    const onOutput = ({ data }: { data: string }) => setOutput(prev => prev + data);
+    const onError = ({ message }: { message: string }) => { setStatus("error"); setErrorMsg(message); };
+    const onClosed = () => { setStatus("idle"); setOutput(prev => prev + "\n\n[SSH session closed]\n"); };
 
     socket.on("ssh:ready", onReady);
     socket.on("ssh:output", onOutput);
@@ -85,7 +91,7 @@ export default function SshPage() {
     setErrorMsg("");
     setOutput("");
     setConnectedLabel(`${username}@${host}`);
-    const socket = getSocket();
+    const socket = ensureSocket();
     socket.emit("ssh:connect", {
       host: host.trim(),
       port: parseInt(port) || 22,
@@ -95,7 +101,7 @@ export default function SshPage() {
   }
 
   function handleDisconnect() {
-    const socket = getSocket();
+    const socket = ensureSocket();
     socket.emit("ssh:disconnect");
     setStatus("idle");
     setOutput("");

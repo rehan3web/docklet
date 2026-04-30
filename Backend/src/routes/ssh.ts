@@ -24,6 +24,7 @@ export function registerSshSocketHandlers(socket: Socket) {
         host: string; port?: number; username: string; password: string;
     }) => {
         closeSession();
+        console.log(`[SSH] connect request: ${username}@${host}:${port || 22} (socket=${sid})`);
 
         if (!host || !username || !password) {
             socket.emit('ssh:error', { message: 'host, username and password are required' });
@@ -33,6 +34,7 @@ export function registerSshSocketHandlers(socket: Socket) {
         const client = new SshClient();
 
         client.on('ready', () => {
+            console.log(`[SSH] connected: ${username}@${host}`);
             client.shell(
                 { term: 'xterm-256color', rows: 40, cols: 160 },
                 (err: any, stream: any) => {
@@ -61,6 +63,7 @@ export function registerSshSocketHandlers(socket: Socket) {
         });
 
         client.on('error', (err: any) => {
+            console.log(`[SSH] error: ${err.message}`);
             socket.emit('ssh:error', { message: err.message || 'SSH connection failed' });
         });
 
