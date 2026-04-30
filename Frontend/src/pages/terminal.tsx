@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Terminal as TerminalIcon, Sparkles, Settings, AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { Terminal as TerminalIcon, Sparkles, Settings, AlertTriangle, Loader2, Trash2, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
-import { ModeToggle } from "@/components/mode-toggle";
+import { useTheme } from "@/hooks/use-theme";
 import {
   useGetCommandSuggestions,
   useGetTerminalSettings,
@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 type LogLine = { stream: "stdout" | "stderr" | "system" | "input"; text: string };
 
 export default function TerminalPage() {
+  const { theme, toggle } = useTheme();
   const qc = useQueryClient();
   const { data: suggestionsData } = useGetCommandSuggestions();
   const { data: settings, refetch: refetchSettings } = useGetTerminalSettings();
@@ -243,15 +244,15 @@ export default function TerminalPage() {
       <div className="flex-1 flex flex-col min-w-0 h-screen">
 
         {/* Header */}
-        <header className="border-b border-border bg-background shrink-0">
-          <div className="px-4 h-14 flex items-center justify-between">
+        <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border">
+          <div className="px-4 h-18 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <MobileSidebarTrigger />
-              <div className="flex items-center gap-2.5">
-                <div className="p-1.5 rounded-md bg-primary/10 border border-primary/20">
-                  <TerminalIcon className="w-3.5 h-3.5 text-primary" />
+              <div className="hidden lg:flex items-center gap-3">
+                <div className="p-1 rounded bg-primary/10 border border-primary/20 shrink-0">
+                  <TerminalIcon className="w-4 h-4 text-primary" />
                 </div>
-                <span className="font-semibold text-sm">AI Terminal</span>
+                <span className="font-medium text-sm tracking-tight text-foreground">AI Terminal</span>
                 <Badge variant="outline" className={`text-[10px] font-mono uppercase rounded-full px-2 py-0 h-4 ${
                   settings?.configured
                     ? "text-emerald-500 bg-emerald-500/10 border-emerald-500/20"
@@ -262,11 +263,13 @@ export default function TerminalPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs text-muted-foreground gap-1.5 px-3" onClick={() => setSettingsOpen(true)}>
+              <Button variant="ghost" size="sm" className="h-8 rounded-full text-xs text-muted-foreground gap-1.5 px-3 hover:bg-muted/60" onClick={() => setSettingsOpen(true)}>
                 <Settings className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Settings</span>
               </Button>
-              <ModeToggle />
+              <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors" onClick={toggle} aria-label="Toggle theme">
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </Button>
             </div>
           </div>
         </header>

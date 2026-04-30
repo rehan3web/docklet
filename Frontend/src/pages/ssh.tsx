@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Terminal, Loader2, Plug, PlugZap, AlertTriangle, Trash2 } from "lucide-react";
+import { Terminal, Loader2, Plug, PlugZap, AlertTriangle, Trash2, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
-import { ModeToggle } from "@/components/mode-toggle";
+import { useTheme } from "@/hooks/use-theme";
 import { getSocket } from "@/api/socket";
 
 // Strip ANSI / VT100 escape sequences, but keep \x08 (BS) and \r so we can
@@ -58,6 +58,7 @@ function applyToBuffer(prev: string, raw: string): string {
 type Status = "idle" | "connecting" | "connected" | "error";
 
 export default function SshPage() {
+  const { theme, toggle } = useTheme();
   const [host, setHost] = useState("");
   const [port, setPort] = useState("22");
   const [username, setUsername] = useState("");
@@ -198,15 +199,15 @@ export default function SshPage() {
       <div className="flex-1 flex flex-col min-w-0 h-screen">
 
         {/* Header */}
-        <header className="border-b border-border bg-background shrink-0">
-          <div className="px-4 h-14 flex items-center justify-between">
+        <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border">
+          <div className="px-4 h-18 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <MobileSidebarTrigger />
-              <div className="flex items-center gap-2.5">
-                <div className="p-1.5 rounded-md bg-primary/10 border border-primary/20">
-                  <PlugZap className="w-3.5 h-3.5 text-primary" />
+              <div className="hidden lg:flex items-center gap-3">
+                <div className="p-1 rounded bg-primary/10 border border-primary/20 shrink-0">
+                  <PlugZap className="w-4 h-4 text-primary" />
                 </div>
-                <span className="font-semibold text-sm">SSH Session</span>
+                <span className="font-medium text-sm tracking-tight text-foreground">SSH Session</span>
                 {status === "connected" && (
                   <Badge variant="outline" className="text-[10px] font-mono rounded-full px-2 py-0 h-4 text-emerald-500 bg-emerald-500/10 border-emerald-500/20">
                     {connectedLabel}
@@ -226,11 +227,13 @@ export default function SshPage() {
             </div>
             <div className="flex items-center gap-2">
               {status === "connected" && (
-                <Button variant="outline" size="sm" className="h-8 rounded-lg text-xs gap-1.5 px-3 text-red-500 border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-950/30" onClick={handleDisconnect}>
+                <Button variant="outline" size="sm" className="h-8 rounded-full text-xs gap-1.5 px-3 text-red-500 border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-950/30" onClick={handleDisconnect}>
                   <Plug className="w-3.5 h-3.5" /> Disconnect
                 </Button>
               )}
-              <ModeToggle />
+              <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors" onClick={toggle} aria-label="Toggle theme">
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </Button>
             </div>
           </div>
         </header>
