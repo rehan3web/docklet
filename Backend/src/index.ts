@@ -13,6 +13,7 @@ import terminalRoutes from './routes/terminal';
 import dockerRoutes from './routes/docker';
 import deployRoutes from './routes/deploy';
 import proxyRoutes from './routes/proxy';
+import { registerSshSocketHandlers } from './routes/ssh';
 import { setIo } from './lib/socket';
 
 dotenv.config();
@@ -77,6 +78,8 @@ io.on('connection', (socket) => {
     socket.join('authenticated');
     socket.join(`user:${userId}`);
     console.log(`Client connected: ${socket.id} (user=${userId})`);
+
+    registerSshSocketHandlers(socket);
 
     socket.on('subscribe-table', (tableName) => {
         if (typeof tableName === 'string' && /^[a-zA-Z0-9_.-]+$/.test(tableName)) {

@@ -13,6 +13,7 @@ import SettingsPage from "@/pages/settings";
 import BackupRestorePage from "@/pages/backup-restore";
 import VpsPage from "@/pages/vps";
 import TerminalPage from "@/pages/terminal";
+import SshPage from "@/pages/ssh";
 import DockerPage from "@/pages/docker";
 import DeployPage from "@/pages/deploy";
 import ProxyPage from "@/pages/proxy";
@@ -59,6 +60,7 @@ function Router() {
       <Route path="/backup-restore">{() => <PrivateRoute component={BackupRestorePage} />}</Route>
       <Route path="/vps">{() => <PrivateRoute component={VpsPage} />}</Route>
       <Route path="/terminal">{() => <PrivateRoute component={TerminalPage} />}</Route>
+      <Route path="/ssh">{() => <PrivateRoute component={SshPage} />}</Route>
       <Route path="/docker">{() => <PrivateRoute component={DockerPage} />}</Route>
       <Route path="/deploy">{() => <PrivateRoute component={DeployPage} />}</Route>
       <Route path="/proxy">{() => <PrivateRoute component={ProxyPage} />}</Route>

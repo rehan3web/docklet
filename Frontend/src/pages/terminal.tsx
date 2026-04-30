@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Terminal as TerminalIcon, Sparkles, Settings, AlertTriangle, Loader2, Trash2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Terminal as TerminalIcon, Sparkles, Settings, AlertTriangle, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,7 +33,6 @@ export default function TerminalPage() {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
   const activeIdRef = useRef<string | null>(null);
-  const rootModeRef = useRef(false);
   const hiddenInputRef = useRef<HTMLInputElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const [termFocused, setTermFocused] = useState(false);
@@ -52,16 +51,12 @@ export default function TerminalPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiGenerated, setAiGenerated] = useState<{ command: string; safe: boolean; reason?: string } | null>(null);
 
-  // Root mode
-  const [rootMode, setRootMode] = useState(false);
-  useEffect(() => { rootModeRef.current = rootMode; }, [rootMode]);
-
   // Persistent working directory (updated after every command)
-  const [cwd, setCwd] = useState<{ root: string; sandbox: string }>({ root: "/root", sandbox: "/usr/src/app" });
+  const [cwd, setCwd] = useState("/usr/src/app");
 
   // Fetch initial cwd from backend on mount
   useEffect(() => {
-    getTerminalCwd().then(r => setCwd({ root: r.rootCwd, sandbox: r.sandboxCwd })).catch(() => {});
+    getTerminalCwd().then(r => setCwd(r.sandboxCwd)).catch(() => {});
   }, []);
 
   // Settings dialog
@@ -88,9 +83,7 @@ export default function TerminalPage() {
     const onEnd = (e: { id: string; exitCode: number; durationMs: number; cwd?: string }) => {
       if (e.id !== activeIdRef.current) return;
       setLogs(prev => [...prev, { stream: "system", text: `[exit ${e.exitCode} · ${e.durationMs}ms]` }]);
-      if (e.cwd) {
-        setCwd(prev => rootModeRef.current ? { ...prev, root: e.cwd! } : { ...prev, sandbox: e.cwd! });
-      }
+      if (e.cwd) setCwd(e.cwd);
       setRunning(false);
       activeIdRef.current = null;
     };
@@ -128,7 +121,7 @@ export default function TerminalPage() {
     const clientId = generateClientCommandId();
     activeIdRef.current = clientId;
     try {
-      const r = await execCommand(cmd, confirm, clientId, rootMode);
+      const r = await execCommand(cmd, confirm, clientId, false);
       if (r.requiresConfirmation) {
         setPendingExec(cmd);
         setConfirmReason(r.reason || "Dangerous command detected");
@@ -266,11 +259,6 @@ export default function TerminalPage() {
                 }`}>
                   {settings?.configured ? "AI Ready" : "AI Off"}
                 </Badge>
-                {rootMode && (
-                  <Badge variant="outline" className="text-[10px] font-mono uppercase rounded-full px-2 py-0 h-4 text-red-500 bg-red-500/10 border-red-500/20 gap-1">
-                    <ShieldAlert className="w-2.5 h-2.5" /> Root
-                  </Badge>
-                )}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -287,71 +275,23 @@ export default function TerminalPage() {
 
           {/* ── Terminal Window ─────────────────────────────────────── */}
           <div
-            className={`flex-1 overflow-hidden border-b flex flex-col cursor-text transition-colors ${
-              rootMode
-                ? "border-red-400/40 dark:border-red-800/60 bg-[#fff8f8] dark:bg-[#110808]"
-                : "border-[#e0e0e0] dark:border-[#252525] bg-[#f8f8f8] dark:bg-[#0d0d0d]"
-            }`}
+            className="flex-1 overflow-hidden border-b flex flex-col cursor-text border-[#e0e0e0] dark:border-[#252525] bg-[#f8f8f8] dark:bg-[#0d0d0d]"
             onClick={focusTerminal}
           >
             {/* Title bar */}
-            <div className={`flex items-center justify-between px-4 py-2.5 border-b shrink-0 transition-colors ${
-              rootMode
-                ? "bg-red-50 dark:bg-[#1a0808] border-red-200/60 dark:border-red-900/50"
-                : "bg-[#efefef] dark:bg-[#181818] border-[#e0e0e0] dark:border-[#252525]"
-            }`}>
+            <div className="flex items-center justify-between px-4 py-2.5 border-b shrink-0 bg-[#efefef] dark:bg-[#181818] border-[#e0e0e0] dark:border-[#252525]">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#ff5f57] border border-[#e0443e]" />
                 <span className="w-3 h-3 rounded-full bg-[#febc2e] border border-[#d4a012]" />
                 <span className="w-3 h-3 rounded-full bg-[#28c840] border border-[#14ae2c]" />
               </div>
               <div className="flex items-center gap-1.5">
-                {rootMode
-                  ? <ShieldAlert className="w-3 h-3 text-red-400 dark:text-red-500" />
-                  : <TerminalIcon className="w-3 h-3 text-[#aaa] dark:text-[#555]" />
-                }
-                <span className={`text-[11px] font-mono select-none ${rootMode ? "text-red-400 dark:text-red-500" : "text-[#aaa] dark:text-[#555]"}`}>
-                  {rootMode ? "docklet — root" : "docklet — bash"}
+                <TerminalIcon className="w-3 h-3 text-[#aaa] dark:text-[#555]" />
+                <span className="text-[11px] font-mono select-none text-[#aaa] dark:text-[#555]">
+                  docklet — bash
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
-                {/* Sandbox / Root segmented switcher */}
-                <div
-                  className="flex items-center rounded border border-[#d4d4d4] dark:border-[#333] overflow-hidden h-6"
-                  onClick={e => e.stopPropagation()}
-                >
-                  <button
-                    onClick={() => {
-                      if (rootMode) {
-                        setRootMode(false);
-                        setLogs(prev => [...prev, { stream: "system", text: "[switched to Sandbox Terminal]" }]);
-                      }
-                    }}
-                    className={`flex items-center gap-1 px-2.5 h-full text-[10px] font-medium transition-all ${
-                      !rootMode
-                        ? "bg-[#e0e0e0] dark:bg-[#2a2a2a] text-[#333] dark:text-[#ddd]"
-                        : "bg-transparent text-[#999] dark:text-[#555] hover:bg-[#f0f0f0] dark:hover:bg-[#1e1e1e]"
-                    }`}
-                  >
-                    <ShieldCheck className="w-2.5 h-2.5" /> Sandbox
-                  </button>
-                  <span className="w-px h-full bg-[#d4d4d4] dark:bg-[#333] shrink-0" />
-                  <button
-                    onClick={() => {
-                      if (!rootMode) {
-                        setRootMode(true);
-                        setLogs(prev => [...prev, { stream: "system", text: "[switched to Root Terminal — commands run with sudo]" }]);
-                      }
-                    }}
-                    className={`flex items-center gap-1 px-2.5 h-full text-[10px] font-medium transition-all ${
-                      rootMode
-                        ? "bg-red-100 dark:bg-red-950/70 text-red-600 dark:text-red-400"
-                        : "bg-transparent text-[#999] dark:text-[#555] hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-500 dark:hover:text-red-500"
-                    }`}
-                  >
-                    <ShieldAlert className="w-2.5 h-2.5" /> Root
-                  </button>
-                </div>
                 <Button
                   variant="ghost" size="sm"
                   className="h-6 px-2 text-[10px] text-[#aaa] dark:text-[#555] hover:text-[#555] dark:hover:text-[#999] hover:bg-[#e0e0e0] dark:hover:bg-[#222] rounded gap-1"
@@ -428,14 +368,12 @@ export default function TerminalPage() {
                     </div>
                   )}
 
-                  {/* $ / # prompt line */}
+                  {/* $ prompt line */}
                   <div className="flex items-center gap-0 mt-0.5" onClick={e => e.stopPropagation()}>
-                    <span className={`mr-2 select-none font-mono text-xs ${rootMode ? "text-red-400 dark:text-red-500" : "text-[#aaa] dark:text-[#555]"}`}>
-                      {(rootMode ? cwd.root : cwd.sandbox).replace(/^\/root(\/|$)/, "~$1").replace(/^\/home\/[^/]+/, "~")}
+                    <span className="mr-2 select-none font-mono text-xs text-[#aaa] dark:text-[#555]">
+                      {cwd.replace(/^\/root(\/|$)/, "~$1").replace(/^\/home\/[^/]+/, "~")}
                     </span>
-                    <span className={`mr-2 select-none font-bold ${rootMode ? "text-red-400 dark:text-red-500" : "text-[#bbb] dark:text-[#555]"}`}>
-                      {rootMode ? "#" : "$"}
-                    </span>
+                    <span className="mr-2 select-none font-bold text-[#bbb] dark:text-[#555]">$</span>
                     <span className="text-[#111] dark:text-[#e5e5e5] whitespace-pre">{command}</span>
                     <span
                       className={`inline-block w-[8px] h-[14px] bg-[#333] dark:bg-[#e5e5e5] ml-px align-middle ${
