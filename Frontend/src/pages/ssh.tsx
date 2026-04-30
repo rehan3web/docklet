@@ -9,24 +9,50 @@ import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { ModeToggle } from "@/components/mode-toggle";
 import { getSocket } from "@/api/socket";
 
-// Strip ANSI / VT100 escape sequences so raw PTY output renders as clean text.
+// Strip ANSI / VT100 escape sequences, but keep \x08 (BS) and \r so we can
+// handle them structurally in applyToBuffer.
 function stripAnsi(str: string) {
   return str
-    // CSI sequences: ESC [ <param bytes> <intermediate bytes> <final byte>
-    // Covers: ESC[...m  ESC[?2004h  ESC[>4;2m  ESC[!p  etc.
+    // CSI sequences: ESC [ <param bytes 0x20-0x3F> <intermediate 0x20-0x2F> <final 0x40-0x7E>
+    // Covers all of: ESC[?2004h  ESC[>4;2m  ESC[!p  ESC[m  etc.
     .replace(/\x1B\[[\x20-\x3F]*[\x40-\x7E]/g, "")
-    // OSC sequences: ESC ] ... BEL  or  ESC ] ... ESC \
+    // OSC: ESC ] ... BEL  or  ESC ] ... ESC \
     .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, "")
-    // DCS / PM / APC / SOS: ESC P/^/_ ... ESC \
+    // DCS / PM / APC / SOS
     .replace(/\x1B[P^_][^\x1B]*\x1B\\/g, "")
-    // Two-character escape sequences: ESC followed by one char (charset, etc.)
+    // Two-char sequences
     .replace(/\x1B[^\[^\]P^_]/g, "")
     // Lone ESC
     .replace(/\x1B/g, "")
-    // Non-printable control chars (null, bell, BS, shift-in/out, etc.)
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1A\x1C-\x1F]/g, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n");
+    // Non-printable junk — but KEEP \x08 (BS=0x08), \r (0x0D), \n (0x0A), \t (0x09)
+    .replace(/[\x00-\x07\x0B\x0C\x0E-\x1A\x1C-\x1F]/g, "");
+}
+
+// Apply a raw (already ANSI-stripped) chunk to the accumulated display buffer.
+// Handles:
+//   \x08  — backspace: erase previous character
+//   \r\n  — CRLF → newline
+//   \r    — carriage return: go to start of current line (overwrite)
+function applyToBuffer(prev: string, raw: string): string {
+  const stripped = stripAnsi(raw);
+  let buf = prev;
+  for (let i = 0; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (ch === "\x08") {
+      if (buf.length > 0 && buf[buf.length - 1] !== "\n") buf = buf.slice(0, -1);
+    } else if (ch === "\r") {
+      if (stripped[i + 1] === "\n") {
+        buf += "\n";
+        i++;
+      } else {
+        const lastNl = buf.lastIndexOf("\n");
+        buf = buf.slice(0, lastNl + 1);
+      }
+    } else {
+      buf += ch;
+    }
+  }
+  return buf;
 }
 
 type Status = "idle" | "connecting" | "connected" | "error";
@@ -64,7 +90,7 @@ export default function SshPage() {
     // re-attach SSH listeners to the new socket instance
     s.off("ssh:ready").off("ssh:output").off("ssh:error").off("ssh:closed");
     s.on("ssh:ready", () => setStatus("connected"));
-    s.on("ssh:output", ({ data }: { data: string }) => setOutput(prev => prev + data));
+    s.on("ssh:output", ({ data }: { data: string }) => setOutput(prev => applyToBuffer(prev, data)));
     s.on("ssh:error", ({ message }: { message: string }) => { setStatus("error"); setErrorMsg(message); });
     s.on("ssh:closed", () => { setStatus("idle"); setOutput(prev => prev + "\n\n[SSH session closed]\n"); });
     return s;
@@ -76,7 +102,7 @@ export default function SshPage() {
     socketRef.current = socket;
 
     const onReady = () => setStatus("connected");
-    const onOutput = ({ data }: { data: string }) => setOutput(prev => prev + data);
+    const onOutput = ({ data }: { data: string }) => setOutput(prev => applyToBuffer(prev, data));
     const onError = ({ message }: { message: string }) => { setStatus("error"); setErrorMsg(message); };
     const onClosed = () => { setStatus("idle"); setOutput(prev => prev + "\n\n[SSH session closed]\n"); };
 
@@ -164,7 +190,7 @@ export default function SshPage() {
     if (status === "connected") hiddenInputRef.current?.focus();
   }
 
-  const displayText = stripAnsi(output);
+  const displayText = output;
 
   return (
     <div className="h-screen bg-background text-foreground flex overflow-hidden">
@@ -329,8 +355,21 @@ export default function SshPage() {
                 ref={outputRef}
                 className="flex-1 overflow-y-auto p-4 font-mono text-[13px] leading-[1.6] select-text"
               >
+                <style>{`@keyframes ssh-blink{0%,100%{opacity:1}50%{opacity:0}}`}</style>
                 <pre className="whitespace-pre-wrap break-words text-[#111] dark:text-[#e5e5e5] m-0">
                   {displayText}
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: "0.55em",
+                      height: "1.1em",
+                      background: "currentColor",
+                      verticalAlign: "text-bottom",
+                      marginLeft: "1px",
+                      animation: "ssh-blink 1.1s step-end infinite",
+                      opacity: termFocused ? 1 : 0.35,
+                    }}
+                  />
                 </pre>
               </div>
 
