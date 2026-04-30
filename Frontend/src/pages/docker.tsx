@@ -278,19 +278,15 @@ function TerminalDialog({ container, open, onClose }: { container: DockerContain
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-[760px] p-0 gap-0 overflow-hidden">
-        <DialogHeader className="p-4 pb-3 border-b border-border flex-row items-center justify-between">
-          <div>
-            <DialogTitle className="text-sm font-medium flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-muted-foreground" />
-              Terminal — {container.names[0] || container.shortId}
-            </DialogTitle>
-            <DialogDescription className="text-xs mt-0.5">
+        <DialogHeader className="p-4 pb-3 border-b border-border">
+          <DialogTitle className="text-sm font-medium flex items-center gap-2 flex-wrap">
+            <Terminal className="w-4 h-4 text-muted-foreground shrink-0" />
+            Terminal — {container.names[0] || container.shortId}
+            <span className="text-muted-foreground/40 font-normal">·</span>
+            <span className="text-xs text-muted-foreground font-normal">
               {connected ? "Connected — type commands and press Enter" : error ? `Error: ${error}` : "Connecting…"}
-            </DialogDescription>
-          </div>
-          <Badge variant="outline" className={`text-[10px] rounded-full px-2 font-mono uppercase ${connected ? "text-primary bg-primary/10 border-primary/20" : "text-muted-foreground bg-muted/50"}`}>
-            {connected ? "connected" : error ? "error" : "connecting"}
-          </Badge>
+            </span>
+          </DialogTitle>
         </DialogHeader>
 
         <div
