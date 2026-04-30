@@ -1,0 +1,62 @@
+root@root:~/docklet# git pull && docker compose -f postgres.yml up --build -d docklet-server
+remote: Enumerating objects: 15, done.
+remote: Counting objects: 100% (15/15), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 8 (delta 7), reused 8 (delta 7), pack-reused 0 (from 0)
+Unpacking objects: 100% (8/8), 1.09 KiB | 371.00 KiB/s, done.
+From https://github.com/rehan3web/docklet
+   bf35f37..e60fa97  main       -> origin/main
+Updating bf35f37..e60fa97
+Fast-forward
+ Backend/Dockerfile             |  2 +-
+ Backend/src/routes/terminal.ts | 38 +++++++++++++++++++++-----------------
+ postgres.yml                   |  4 ++++
+ 3 files changed, 26 insertions(+), 18 deletions(-)
+[+] Building 19.8s (12/12) FINISHED                                                                                                                           
+ => [internal] load local bake definitions                                                                                                               0.0s
+ => => reading from stdin 526B                                                                                                                           0.0s
+ => [internal] load build definition from Dockerfile                                                                                                     0.0s
+ => => transferring dockerfile: 280B                                                                                                                     0.0s
+ => [internal] load metadata for docker.io/library/node:20-alpine                                                                                        0.4s
+ => [internal] load .dockerignore                                                                                                                        0.0s
+ => => transferring context: 87B                                                                                                                         0.0s
+ => CACHED [1/7] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                           0.0s
+ => => resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                                  0.0s
+ => [internal] load build context                                                                                                                        0.0s
+ => => transferring context: 11.18kB                                                                                                                     0.0s
+ => [2/7] RUN apk add --no-cache postgresql-client docker-cli docker-compose bash git util-linux                                                         2.9s
+ => [3/7] WORKDIR /usr/src/app                                                                                                                           0.1s 
+ => [4/7] COPY package*.json ./                                                                                                                          0.1s 
+ => [5/7] RUN npm install                                                                                                                                8.1s 
+ => [6/7] COPY . .                                                                                                                                       0.1s 
+ => ERROR [7/7] RUN npm run build                                                                                                                        7.8s 
+------                                                                                                                                                        
+ > [7/7] RUN npm run build:                                                                                                                                   
+0.586                                                                                                                                                         
+0.586 > server@1.0.0 build                                                                                                                                    
+0.586 > tsc
+0.586 
+7.727 src/routes/terminal.ts(114,5): error TS18047: 'child.stdout' is possibly 'null'.
+7.729 src/routes/terminal.ts(119,5): error TS18047: 'child.stderr' is possibly 'null'.
+------
+[+] up 0/1
+ ⠙ Image docklet-docklet-server Building                                                                                                                 19.9s
+Dockerfile:11
+
+--------------------
+
+   9 |     
+
+  10 |     COPY . .
+
+  11 | >>> RUN npm run build
+
+  12 |     
+
+  13 |     EXPOSE 3001
+
+--------------------
+
+failed to solve: process "/bin/sh -c npm run build" did not complete successfully: exit code: 2
+
+root@root:~/docklet# 

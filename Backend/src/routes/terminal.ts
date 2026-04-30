@@ -111,12 +111,12 @@ router.post('/exec', authenticateToken, async (req, res) => {
         }
     }, COMMAND_TIMEOUT_MS);
 
-    child.stdout.on('data', (data) => {
+    child.stdout?.on('data', (data) => {
         const chunk = data.toString();
         output += chunk;
         emitToUser(userId, 'terminal-output', { id, chunk, stream: 'stdout' });
     });
-    child.stderr.on('data', (data) => {
+    child.stderr?.on('data', (data) => {
         const chunk = data.toString();
         output += chunk;
         emitToUser(userId, 'terminal-output', { id, chunk, stream: 'stderr' });
