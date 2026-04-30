@@ -227,11 +227,13 @@ export function registerDockerExecSocketHandlers(socket: Socket) {
         }
         try {
             const container = getDocker().getContainer(containerId);
-            // Try bash first, fall back to sh
-            const shells = ['/bin/bash', '/bin/sh', 'sh'];
-            let execStream: any = null;
+            // /bin/sh exists in every container (Alpine ash, Debian dash, etc.)
+            // bash is a bonus — try sh first so Alpine containers connect immediately
+            const shells = ['/bin/sh', '/bin/bash', 'bash', 'sh'];
 
-            for (const shell of shells) {
+            type StreamResult = { stream: any; firstChunk: Buffer | null };
+
+            async function tryShell(shell: string): Promise<StreamResult | null> {
                 try {
                     const exec = await container.exec({
                         Cmd: [shell],
@@ -241,18 +243,51 @@ export function registerDockerExecSocketHandlers(socket: Socket) {
                         Tty: true,
                         Env: ['TERM=xterm-256color'],
                     });
-                    execStream = await exec.start({ hijack: true, stdin: true });
-                    break;
-                } catch { /* try next shell */ }
+                    const stream = await exec.start({ hijack: true, stdin: true });
+
+                    // Race: first data chunk (shell started) vs immediate end (shell not found).
+                    // exec.start() does NOT throw when the binary is missing — Docker sends the
+                    // OCI error through the stream and then closes it.
+                    const firstChunk = await new Promise<Buffer | null>((resolve) => {
+                        let settled = false;
+                        const finish = (v: Buffer | null) => { if (!settled) { settled = true; resolve(v); } };
+                        stream.once('data', (chunk: Buffer) => finish(chunk));
+                        stream.once('end',  () => finish(null));
+                        stream.once('error', () => finish(null));
+                        // Safety timeout: if no event in 3 s, assume it started (rare slow hosts)
+                        setTimeout(() => finish(Buffer.alloc(0)), 3000);
+                    });
+
+                    if (firstChunk === null) {
+                        // Shell binary absent — stream ended immediately
+                        try { stream.destroy(); } catch { /* ignore */ }
+                        return null;
+                    }
+                    return { stream, firstChunk };
+                } catch {
+                    return null;
+                }
             }
 
-            if (!execStream) {
-                socket.emit('docker:exec:error', { message: 'No shell available in container' });
+            let result: StreamResult | null = null;
+            for (const shell of shells) {
+                result = await tryShell(shell);
+                if (result) break;
+            }
+
+            if (!result) {
+                socket.emit('docker:exec:error', { message: 'No shell found in container (/bin/sh, /bin/bash, bash, sh all failed)' });
                 return;
             }
 
+            const { stream: execStream, firstChunk } = result;
             execSessions.set(sid, { stream: execStream });
             socket.emit('docker:exec:ready', {});
+
+            // Replay the first chunk we already consumed during shell detection
+            if (firstChunk && firstChunk.length > 0) {
+                socket.emit('docker:exec:data', firstChunk.toString('utf8'));
+            }
 
             execStream.on('data', (chunk: Buffer) => {
                 socket.emit('docker:exec:data', chunk.toString('utf8'));
