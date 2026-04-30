@@ -1,0 +1,94 @@
+remote: Enumerating objects: 11, done.
+remote: Counting objects: 100% (11/11), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 6 (delta 5), reused 6 (delta 5), pack-reused 0 (from 0)
+Unpacking objects: 100% (6/6), 970 bytes | 485.00 KiB/s, done.
+From https://github.com/rehan3web/docklet
+   41b5a94..cc71986  main       -> origin/main
+Updating 41b5a94..cc71986
+Fast-forward
+ Backend/src/routes/storage.ts | 31 ++++++++++++++++++++++---------
+ 1 file changed, 22 insertions(+), 9 deletions(-)
+[+] down 8/8
+ ✔ Container docklet-client  Removed                                                                                                                      0.5s
+ ✔ Container docklet-haproxy Removed                                                                                                                      0.5s
+ ✔ Container docklet-nginx   Removed                                                                                                                      0.4s
+ ✔ Container docklet-server  Removed                                                                                                                      0.3s
+ ✔ Container docklet-pooler  Removed                                                                                                                      0.3s
+ ✔ Container docklet-db      Removed                                                                                                                      0.2s
+ ✔ Network docklet-apps      Removed                                                                                                                      0.2s
+ ✔ Network docklet_default   Removed                                                                                                                      0.1s
+[+] Building 9.2s (28/28) FINISHED                                                                                                                            
+ => [internal] load local bake definitions                                                                                                               0.0s
+ => => reading from stdin 967B                                                                                                                           0.0s
+ => [docklet-client internal] load build definition from Dockerfile                                                                                      0.0s
+ => => transferring dockerfile: 307B                                                                                                                     0.0s
+ => [docklet-server internal] load build definition from Dockerfile                                                                                      0.0s
+ => => transferring dockerfile: 280B                                                                                                                     0.0s
+ => [docklet-server internal] load metadata for docker.io/library/node:20-alpine                                                                         0.4s
+ => [docklet-client internal] load metadata for docker.io/library/nginx:alpine                                                                           0.0s
+ => [docklet-server internal] load .dockerignore                                                                                                         0.0s
+ => => transferring context: 87B                                                                                                                         0.0s
+ => [docklet-client internal] load .dockerignore                                                                                                         0.0s
+ => => transferring context: 79B                                                                                                                         0.0s
+ => [docklet-server 1/7] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                   0.0s
+ => => resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                                  0.0s
+ => [docklet-server internal] load build context                                                                                                         0.0s
+ => => transferring context: 16.91kB                                                                                                                     0.0s
+ => [docklet-client internal] load build context                                                                                                         0.0s
+ => => transferring context: 6.25kB                                                                                                                      0.0s
+ => [docklet-client stage-1 1/3] FROM docker.io/library/nginx:alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de             0.0s
+ => => resolve docker.io/library/nginx:alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de                                    0.0s
+ => CACHED [docklet-client build 2/6] WORKDIR /app                                                                                                       0.0s
+ => CACHED [docklet-client build 3/6] COPY package*.json ./                                                                                              0.0s
+ => CACHED [docklet-client build 4/6] RUN npm install                                                                                                    0.0s
+ => CACHED [docklet-client build 5/6] COPY . .                                                                                                           0.0s
+ => CACHED [docklet-client build 6/6] RUN npm run build                                                                                                  0.0s
+ => CACHED [docklet-client stage-1 2/3] COPY --from=build /app/dist /usr/share/nginx/html                                                                0.0s
+ => CACHED [docklet-client stage-1 3/3] COPY nginx.conf /etc/nginx/conf.d/default.conf                                                                   0.0s
+ => CACHED [docklet-server 2/7] RUN apk add --no-cache postgresql-client docker-cli docker-compose bash git util-linux                                   0.0s
+ => CACHED [docklet-server 3/7] WORKDIR /usr/src/app                                                                                                     0.0s
+ => CACHED [docklet-server 4/7] COPY package*.json ./                                                                                                    0.0s
+ => CACHED [docklet-server 5/7] RUN npm install                                                                                                          0.0s
+ => [docklet-server 6/7] COPY . .                                                                                                                        0.0s
+ => [docklet-client] exporting to image                                                                                                                  0.2s
+ => => exporting layers                                                                                                                                  0.0s
+ => => exporting manifest sha256:120b90cd17b1cb9241e40893ea5a30ac2668267c593dfeb093d6cd1bc4fbb96f                                                        0.0s
+ => => exporting config sha256:6ec4827f59d1c6b6c14bed2097d2373bc70592ff9eb61a16c96ef3a6a83fc54b                                                          0.0s
+ => => exporting attestation manifest sha256:708c3305675a8d2cee9804ec4d4c9f5863dc8e2401aea8575a5c439c6f3cc081                                            0.0s
+ => => exporting manifest list sha256:d392ac40e022bbc013df3b71822ecd01e2f9e7cec7909ae8cf39621f4a85bd61                                                   0.0s
+ => => naming to docker.io/library/docklet-docklet-client:latest                                                                                         0.0s
+ => => unpacking to docker.io/library/docklet-docklet-client:latest                                                                                      0.0s
+ => [docklet-server 7/7] RUN npm run build                                                                                                               8.0s
+ => [docklet-client] resolving provenance for metadata file                                                                                              0.0s
+ => [docklet-server] exporting to image                                                                                                                  0.3s
+ => => exporting layers                                                                                                                                  0.1s
+ => => exporting manifest sha256:2cbd7da54a9a396a31258a19a622c08553bbd6ea4b1a8114158910430a9050cb                                                        0.0s
+ => => exporting config sha256:cf4fd592f8c4628d877af558ba102b3b689aae03fd24dac4257ebf0d3fab6848                                                          0.0s
+ => => exporting attestation manifest sha256:02fcb8c51ea5e2e13d7901d8c6634a996af23f97a6f9a09c5c4510b36447c44a                                            0.0s
+ => => exporting manifest list sha256:1274d28bf2fd4cef1993084c79ef6712c66a8c97b45183b7336f2a373f519f72                                                   0.0s
+ => => naming to docker.io/library/docklet-docklet-server:latest                                                                                         0.0s
+ => => unpacking to docker.io/library/docklet-docklet-server:latest                                                                                      0.1s
+ => [docklet-server] resolving provenance for metadata file                                                                                              0.0s
+[+] up 10/10
+ ✔ Image docklet-docklet-client Built                                                                                                                     9.2s
+ ✔ Image docklet-docklet-server Built                                                                                                                     9.2s
+ ✔ Network docklet-apps         Created                                                                                                                   0.0s
+ ✔ Network docklet_default      Created                                                                                                                   0.0s
+ ✔ Container docklet-db         Healthy                                                                                                                  11.1s
+ ✔ Container docklet-pooler     Started                                                                                                                  11.2s
+ ✔ Container docklet-server     Started                                                                                                                  11.4s
+ ✔ Container docklet-nginx      Started                                                                                                                  11.9s
+ ✔ Container docklet-client     Started                                                                                                                  11.9s
+ ✔ Container docklet-haproxy    Started                                                                                                                  12.0s
+root@root:~/docklet# docker logs docklet-minio
+MinIO Object Storage Server
+Copyright: 2015-2026 MinIO, Inc.
+License: GNU AGPLv3 - https://www.gnu.org/licenses/agpl-3.0.html
+Version: RELEASE.2025-09-07T16-13-09Z (go1.24.6 linux/amd64)
+
+API: http://172.17.0.2:9000  http://127.0.0.1:9000 
+WebUI: http://172.17.0.2:9001 http://127.0.0.1:9001  
+
+Docs: https://docs.min.io
+root@root:~/docklet# 

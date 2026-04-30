@@ -20,7 +20,7 @@ import {
   useGetStorageInstance,
   storageConnect, storageDisconnect, storageCreateBucket, storageDeleteBucket,
   storageDeleteFiles, storageRenameFile, storageDownloadUrl, storageUploadFile,
-  storageCreateInstance, storageDestroyInstance,
+  storageCreateInstance, storageInstanceHealth, storageDestroyInstance,
   type StorageBucket, type StorageFile,
 } from "@/api/client";
 
@@ -119,78 +119,104 @@ function ConnectDialog({ open, onClose, onConnected }: { open: boolean; onClose:
 }
 
 // ── Create Instance Dialog ────────────────────────────────────────────────────
-type CreateStep = { label: string; status: "pending" | "active" | "done" | "error" };
+type StepStatus = "pending" | "active" | "done" | "error";
+type CreateStep = { label: string; status: StepStatus };
+
+const INIT_STEPS: CreateStep[] = [
+  { label: "Pull image & start container", status: "pending" },
+  { label: "Join backend network", status: "pending" },
+  { label: "Wait for MinIO to be ready", status: "pending" },
+  { label: "Save connection", status: "pending" },
+];
 
 function CreateInstanceDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [accessKey, setAccessKey] = useState("minioadmin");
   const [secretKey, setSecretKey] = useState("minioadmin123");
-  const [busy, setBusy] = useState(false);
-  const [steps, setSteps] = useState<CreateStep[]>([
-    { label: "Pull MinIO image", status: "pending" },
-    { label: "Create & start container", status: "pending" },
-    { label: "Wait for MinIO to be ready", status: "pending" },
-    { label: "Connect storage", status: "pending" },
-  ]);
+  const [phase, setPhase] = useState<"form" | "creating" | "polling">("form");
+  const [steps, setSteps] = useState<CreateStep[]>(INIT_STEPS);
   const [errorMsg, setErrorMsg] = useState("");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  function setStep(idx: number, status: CreateStep["status"]) {
-    setSteps(prev => prev.map((s, i) => i === idx ? { ...s, status } : i < idx ? { ...s, status: "done" } : s));
+  function markStep(idx: number, status: StepStatus) {
+    setSteps(prev => prev.map((s, i) =>
+      i < idx ? { ...s, status: "done" }
+      : i === idx ? { ...s, status }
+      : s
+    ));
+  }
+
+  function stopPolling() {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }
+
+  function reset() {
+    stopPolling();
+    setPhase("form");
+    setErrorMsg("");
+    setSteps(INIT_STEPS);
+  }
+
+  // Start polling health endpoint
+  function startPolling(onReady: () => void, onError: (msg: string) => void) {
+    let attempts = 0;
+    pollRef.current = setInterval(async () => {
+      attempts++;
+      try {
+        const h = await storageInstanceHealth();
+        if (h.ready) {
+          stopPolling();
+          markStep(3, "done");
+          onReady();
+        } else if (attempts > 60) {
+          stopPolling();
+          onError("MinIO did not become ready within 90 seconds. Check Docker logs for docklet-minio.");
+        }
+      } catch (err: any) {
+        if (attempts > 60) {
+          stopPolling();
+          onError(err.message || "Health check failed");
+        }
+      }
+    }, 1500);
   }
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
     if (secretKey.length < 8) { toast.error("Secret key must be at least 8 characters"); return; }
-    setBusy(true);
     setErrorMsg("");
-    setSteps(steps.map((s, i) => ({ ...s, status: i === 0 ? "active" : "pending" })));
-
-    // Animate steps while backend processes
-    const ticker = setInterval(() => {
-      setSteps(prev => {
-        const activeIdx = prev.findIndex(s => s.status === "active");
-        if (activeIdx === -1 || activeIdx >= prev.length - 1) return prev;
-        // advance roughly every 8s
-        return prev;
-      });
-    }, 500);
-
-    // Simulate step progression while request is in flight
-    let stepIdx = 0;
-    const advance = () => {
-      stepIdx = Math.min(stepIdx + 1, 3);
-      setStep(stepIdx, "active");
-    };
-    const t1 = setTimeout(advance, 8000);   // image pull done
-    const t2 = setTimeout(advance, 12000);  // container started
-    const t3 = setTimeout(advance, 14000);  // waiting
+    setPhase("creating");
+    setSteps(INIT_STEPS.map((s, i) => ({ ...s, status: i === 0 ? "active" : "pending" })));
 
     try {
       await storageCreateInstance(accessKey, secretKey);
-      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearInterval(ticker);
-      setSteps(s => s.map(x => ({ ...x, status: "done" })));
-      await new Promise(r => setTimeout(r, 600));
-      toast.success("MinIO instance created and connected");
-      onCreated();
-      onClose();
+      // Container is started and joined to network — now poll for readiness
+      markStep(1, "done");
+      markStep(2, "active");
+      setPhase("polling");
+      startPolling(
+        () => {
+          setPhase("form");
+          toast.success("MinIO instance created and connected");
+          onCreated();
+          onClose();
+          reset();
+        },
+        (msg) => {
+          markStep(2, "error");
+          setErrorMsg(msg);
+          setPhase("creating"); // stay on progress view
+        }
+      );
     } catch (err: any) {
-      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearInterval(ticker);
-      setSteps(prev => prev.map((s, i) => s.status === "active" ? { ...s, status: "error" } : s));
+      markStep(0, "error");
       setErrorMsg(err.message || "Failed to create instance");
-    } finally {
-      setBusy(false);
+      setPhase("creating");
     }
   }
 
-  function reset() {
-    setBusy(false);
-    setErrorMsg("");
-    setSteps([
-      { label: "Pull MinIO image", status: "pending" },
-      { label: "Create & start container", status: "pending" },
-      { label: "Wait for MinIO to be ready", status: "pending" },
-      { label: "Connect storage", status: "pending" },
-    ]);
-  }
+  useEffect(() => { return () => stopPolling(); }, []);
+
+  const busy = phase === "creating" || phase === "polling";
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && !busy) { reset(); onClose(); } }}>
@@ -204,7 +230,7 @@ function CreateInstanceDialog({ open, onClose, onCreated }: { open: boolean; onC
           </DialogDescription>
         </DialogHeader>
 
-        {!busy ? (
+        {phase === "form" ? (
           <form onSubmit={create} className="space-y-4 pt-1">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -218,10 +244,9 @@ function CreateInstanceDialog({ open, onClose, onCreated }: { open: boolean; onC
               </div>
             </div>
             <div className="rounded-lg bg-muted/40 border border-border px-3 py-2.5 text-xs text-muted-foreground space-y-1">
-              <div className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-primary" /><span>Ports <strong className="text-foreground">9000</strong> (API) and <strong className="text-foreground">9001</strong> (Console) will be bound on the host</span></div>
-              <div className="flex items-center gap-1.5"><Database className="w-3 h-3 text-primary" /><span>Data persisted at <code className="font-mono">/var/lib/docklet/minio-data</code></span></div>
+              <div className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-primary" /><span>Ports <strong className="text-foreground">9000</strong> (API) and <strong className="text-foreground">9001</strong> (Console) bound on host</span></div>
+              <div className="flex items-center gap-1.5"><Database className="w-3 h-3 text-primary" /><span>Data at <code className="font-mono">/var/lib/docklet/minio-data</code></span></div>
             </div>
-            {errorMsg && <p className="text-xs text-destructive">{errorMsg}</p>}
             <DialogFooter>
               <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Cancel</Button>
               <Button type="submit" size="sm" className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
@@ -230,24 +255,37 @@ function CreateInstanceDialog({ open, onClose, onCreated }: { open: boolean; onC
             </DialogFooter>
           </form>
         ) : (
-          <div className="py-2 space-y-3">
-            <p className="text-xs text-muted-foreground">This may take a minute while the image is pulled and MinIO starts up.</p>
-            <div className="space-y-2.5">
+          <div className="py-2 space-y-4">
+            <div className="space-y-3">
               {steps.map((s, i) => (
-                <div key={i} className="flex items-center gap-2.5">
-                  {s.status === "done" && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
-                  {s.status === "active" && <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />}
-                  {s.status === "pending" && <Circle className="w-4 h-4 text-muted-foreground/30 shrink-0" />}
-                  {s.status === "error" && <X className="w-4 h-4 text-destructive shrink-0" />}
-                  <span className={`text-xs ${s.status === "active" ? "text-foreground font-medium" : s.status === "done" ? "text-muted-foreground line-through" : s.status === "error" ? "text-destructive" : "text-muted-foreground/50"}`}>
+                <div key={i} className="flex items-start gap-2.5">
+                  <div className="mt-0.5 shrink-0">
+                    {s.status === "done" && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                    {s.status === "active" && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
+                    {s.status === "pending" && <Circle className="w-4 h-4 text-muted-foreground/25" />}
+                    {s.status === "error" && <X className="w-4 h-4 text-destructive" />}
+                  </div>
+                  <span className={`text-xs leading-5 ${
+                    s.status === "active" ? "text-foreground font-medium"
+                    : s.status === "done" ? "text-muted-foreground"
+                    : s.status === "error" ? "text-destructive"
+                    : "text-muted-foreground/40"
+                  }`}>
                     {s.label}
+                    {s.status === "active" && i === 2 && (
+                      <span className="ml-1 text-muted-foreground font-normal">polling every 1.5 s…</span>
+                    )}
                   </span>
                 </div>
               ))}
             </div>
             {errorMsg && (
-              <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive">{errorMsg}</div>
+              <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2.5 text-xs text-destructive">
+                {errorMsg}
+                <button className="block mt-1.5 text-foreground underline underline-offset-2 text-xs" onClick={reset}>Try again</button>
+              </div>
             )}
+            {!errorMsg && <p className="text-xs text-muted-foreground">Hang tight — MinIO is initializing. This usually takes 5–15 seconds.</p>}
           </div>
         )}
       </DialogContent>

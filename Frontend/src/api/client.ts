@@ -733,8 +733,12 @@ export function useGetStorageInstance() {
   });
 }
 
-export async function storageCreateInstance(access_key: string, secret_key: string): Promise<{ ok: boolean }> {
+export async function storageCreateInstance(access_key: string, secret_key: string): Promise<{ ok: boolean; endpoint: string }> {
   return apiFetch("/storage/instance", { method: "POST", body: JSON.stringify({ access_key, secret_key }) });
+}
+
+export async function storageInstanceHealth(): Promise<{ ready: boolean; reason?: string; endpoint?: string }> {
+  return apiFetch("/storage/instance/health");
 }
 
 export async function storageDestroyInstance(): Promise<{ ok: boolean }> {

@@ -262,26 +262,39 @@ function pullImage(tag: string): Promise<void> {
     });
 }
 
-async function waitForMinio(endpoint: string, accessKey: string, secretKey: string, retries = 20): Promise<void> {
-    const cfg = { endpoint, port: 9000, access_key: accessKey, secret_key: secretKey, region: 'us-east-1', use_ssl: false };
-    for (let i = 0; i < retries; i++) {
-        await new Promise(r => setTimeout(r, 1500));
-        try {
-            await buildClient(cfg).send(new ListBucketsCommand({}));
-            return;
-        } catch { /* not ready yet */ }
-    }
-    throw new Error('MinIO did not become ready in time — check Docker logs for errors');
+// Read own container ID from /etc/hostname (works inside Docker)
+function getSelfContainerId(): string | null {
+    try { return fs.readFileSync('/etc/hostname', 'utf8').trim(); } catch { return null; }
 }
 
-async function getContainerIP(name: string): Promise<string> {
-    const info = await getDocker().getContainer(name).inspect();
-    // Try all networks, prefer bridge
-    const nets = info.NetworkSettings?.Networks || {};
-    for (const key of ['bridge', ...Object.keys(nets)]) {
-        if (nets[key]?.IPAddress) return nets[key].IPAddress;
+// Attach a container to all networks the backend server is on
+async function joinBackendNetworks(containerName: string): Promise<string> {
+    const selfId = getSelfContainerId();
+    let sharedEndpoint = containerName; // Docker DNS fallback
+
+    if (selfId) {
+        try {
+            const selfInfo = await getDocker().getContainer(selfId).inspect();
+            const selfNets = selfInfo.NetworkSettings?.Networks || {};
+            for (const netName of Object.keys(selfNets)) {
+                try {
+                    await getDocker().getNetwork(netName).connect({ Container: containerName });
+                } catch { /* already connected or not connectable */ }
+            }
+            // Give Docker a moment to assign the IP on the new network
+            await new Promise(r => setTimeout(r, 800));
+            // Get IP on the shared network
+            const minioInfo = await getDocker().getContainer(containerName).inspect();
+            const minioNets = minioInfo.NetworkSettings?.Networks || {};
+            for (const netName of Object.keys(selfNets)) {
+                if (minioNets[netName]?.IPAddress) {
+                    sharedEndpoint = minioNets[netName].IPAddress;
+                    break;
+                }
+            }
+        } catch { /* fall through to container name */ }
     }
-    throw new Error('Could not determine container IP address');
+    return sharedEndpoint;
 }
 
 // GET /storage/instance — status of the managed MinIO container
@@ -295,7 +308,44 @@ router.get('/instance', async (_req, res) => {
     }
 });
 
-// POST /storage/instance — create & start MinIO, then auto-connect
+// GET /storage/instance/health — polls MinIO readiness; saves config on first success
+// Frontend calls this repeatedly after POST /instance returns
+router.get('/instance/health', async (_req, res) => {
+    if (!dockerOk()) return res.json({ ready: false, reason: 'Docker not available' });
+    try {
+        const info = await getDocker().getContainer(MINIO_NAME).inspect();
+        if (!info.State.Running) return res.json({ ready: false, reason: 'Container not running' });
+
+        // Grab stored pending credentials
+        const { rows } = await executeQuery('SELECT * FROM storage_instance_pending WHERE id = 1');
+        if (!rows[0]) return res.json({ ready: false, reason: 'No pending instance' });
+
+        const { access_key, secret_key, endpoint } = rows[0];
+        const cfg = { endpoint, port: 9000, access_key, secret_key, region: 'us-east-1', use_ssl: false };
+        try {
+            await buildClient(cfg).send(new ListBucketsCommand({}));
+        } catch {
+            return res.json({ ready: false, reason: 'MinIO not yet accepting connections' });
+        }
+
+        // MinIO is ready — promote to live config
+        await executeQuery(
+            `INSERT INTO storage_config (id, endpoint, port, access_key, secret_key, region, use_ssl, updated_at)
+             VALUES (1, $3, 9000, $1, $2, 'us-east-1', FALSE, NOW())
+             ON CONFLICT (id) DO UPDATE SET
+                 endpoint = $3, port = 9000, access_key = $1, secret_key = $2,
+                 region = 'us-east-1', use_ssl = FALSE, updated_at = NOW()`,
+            [access_key, secret_key, endpoint]
+        );
+        await executeQuery('DELETE FROM storage_instance_pending WHERE id = 1');
+        res.json({ ready: true, endpoint, port: 9000 });
+    } catch (err: any) {
+        res.json({ ready: false, reason: err.message });
+    }
+});
+
+// POST /storage/instance — pull image, create container, join backend network, return quickly
+// The frontend then polls /instance/health until MinIO is ready
 router.post('/instance', async (req, res) => {
     const { access_key, secret_key } = req.body;
     if (!access_key || !secret_key)
@@ -306,16 +356,14 @@ router.post('/instance', async (req, res) => {
         return res.status(503).json({ message: 'Docker is not available on this host' });
 
     try {
-        // Remove any existing container with same name
-        try {
-            await getDocker().getContainer(MINIO_NAME).remove({ force: true });
-        } catch { /* didn't exist */ }
+        // Remove any existing container
+        try { await getDocker().getContainer(MINIO_NAME).remove({ force: true }); } catch { /* ok */ }
 
-        // Pull image (no-op if already present)
+        // Pull image (fast if already cached)
         await pullImage(MINIO_IMAGE);
 
         // Create data dir
-        try { fs.mkdirSync(MINIO_DATA, { recursive: true }); } catch { /* ignore */ }
+        try { fs.mkdirSync(MINIO_DATA, { recursive: true }); } catch { /* ok */ }
 
         // Create and start container
         const container = await getDocker().createContainer({
@@ -335,23 +383,25 @@ router.post('/instance', async (req, res) => {
         });
         await container.start();
 
-        // Get the container's Docker bridge IP (backend is also in Docker, so 127.0.0.1 won't work)
-        const containerIP = await getContainerIP(MINIO_NAME);
+        // Join backend's Docker network so we can reach MinIO by IP
+        const endpoint = await joinBackendNetworks(MINIO_NAME);
 
-        // Wait for MinIO to be ready using its bridge IP
-        await waitForMinio(containerIP, access_key, secret_key);
-
-        // Save connection config using the bridge IP
+        // Store credentials temporarily so /health can verify and save them
+        await executeQuery(`
+            CREATE TABLE IF NOT EXISTS storage_instance_pending (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                access_key TEXT NOT NULL,
+                secret_key TEXT NOT NULL,
+                endpoint TEXT NOT NULL
+            )
+        `);
         await executeQuery(
-            `INSERT INTO storage_config (id, endpoint, port, access_key, secret_key, region, use_ssl, updated_at)
-             VALUES (1, $3, 9000, $1, $2, 'us-east-1', FALSE, NOW())
-             ON CONFLICT (id) DO UPDATE SET
-                 endpoint = $3, port = 9000,
-                 access_key = $1, secret_key = $2,
-                 region = 'us-east-1', use_ssl = FALSE, updated_at = NOW()`,
-            [access_key, secret_key, containerIP]
+            `INSERT INTO storage_instance_pending (id, access_key, secret_key, endpoint) VALUES (1, $1, $2, $3)
+             ON CONFLICT (id) DO UPDATE SET access_key=$1, secret_key=$2, endpoint=$3`,
+            [access_key, secret_key, endpoint]
         );
-        res.json({ ok: true, endpoint: containerIP, port: 9000 });
+
+        res.json({ ok: true, endpoint });
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }
@@ -360,10 +410,9 @@ router.post('/instance', async (req, res) => {
 // DELETE /storage/instance — stop and remove the managed MinIO container
 router.delete('/instance', async (_req, res) => {
     if (!dockerOk()) return res.status(503).json({ message: 'Docker not available' });
-    try {
-        await getDocker().getContainer(MINIO_NAME).remove({ force: true });
-    } catch { /* already gone */ }
-    await executeQuery('DELETE FROM storage_config WHERE id = 1');
+    try { await getDocker().getContainer(MINIO_NAME).remove({ force: true }); } catch { /* ok */ }
+    await executeQuery('DELETE FROM storage_config WHERE id = 1').catch(() => {});
+    await executeQuery('DELETE FROM storage_instance_pending WHERE id = 1').catch(() => {});
     res.json({ ok: true });
 });
 
