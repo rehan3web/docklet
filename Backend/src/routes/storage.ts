@@ -3,6 +3,7 @@ import fs from 'fs';
 import Docker from 'dockerode';
 import { authenticateToken } from '../middleware/auth';
 import { executeQuery } from '../lib/db';
+import dns from 'dns/promises';
 import {
     S3Client,
     ListBucketsCommand,
@@ -14,6 +15,9 @@ import {
     DeleteObjectsCommand,
     CopyObjectCommand,
     GetObjectCommand,
+    GetBucketPolicyCommand,
+    PutBucketPolicyCommand,
+    DeleteBucketPolicyCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import multer from 'multer';
@@ -37,6 +41,15 @@ const upload = multer({
             secret_key TEXT NOT NULL,
             region TEXT NOT NULL DEFAULT 'us-east-1',
             use_ssl BOOLEAN NOT NULL DEFAULT FALSE,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+    await executeQuery(`
+        CREATE TABLE IF NOT EXISTS storage_domains (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            domain TEXT NOT NULL,
+            verified BOOLEAN NOT NULL DEFAULT FALSE,
+            nginx_enabled BOOLEAN NOT NULL DEFAULT FALSE,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     `);
@@ -236,6 +249,187 @@ router.get('/buckets/:bucket/files/download', async (req, res) => {
             { expiresIn: 3600 }
         );
         res.json({ url });
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+});
+
+// ── Domain Management ─────────────────────────────────────────────────────────
+const NGINX_CONTAINER = 'docklet-nginx';
+const NGINX_CONF_PATH = '/etc/nginx/conf.d/minio-domain.conf';
+
+async function getPublicIP(): Promise<string> {
+    const services = ['https://api.ipify.org', 'https://ifconfig.me/ip', 'https://icanhazip.com'];
+    for (const svc of services) {
+        try {
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 3000);
+            const r = await fetch(svc, { signal: ctrl.signal });
+            clearTimeout(t);
+            const ip = (await r.text()).trim();
+            if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return ip;
+        } catch { /* try next */ }
+    }
+    return '';
+}
+
+async function execInContainer(name: string, cmd: string): Promise<string> {
+    const docker = getDocker();
+    const exec = await docker.getContainer(name).exec({
+        Cmd: ['sh', '-c', cmd],
+        AttachStdout: true,
+        AttachStderr: true,
+    });
+    return new Promise<string>((resolve, reject) => {
+        exec.start({ Detach: false }, (err: any, stream: any) => {
+            if (err) return reject(err);
+            let out = '';
+            docker.modem.demuxStream(
+                stream,
+                { write: (d: Buffer) => { out += d.toString(); } } as any,
+                { write: (d: Buffer) => { out += d.toString(); } } as any
+            );
+            stream.on('end', () => resolve(out.trim()));
+            stream.on('error', reject);
+        });
+    });
+}
+
+// GET /storage/domain
+router.get('/domain', async (_req, res) => {
+    const { rows } = await executeQuery('SELECT * FROM storage_domains WHERE id = 1');
+    const serverIP = await getPublicIP();
+    res.json({ domain: rows[0] || null, serverIP });
+});
+
+// POST /storage/domain — save domain
+router.post('/domain', async (req, res) => {
+    const { domain } = req.body;
+    if (!domain) return res.status(400).json({ message: 'domain is required' });
+    const clean = String(domain).toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '').trim();
+    const serverIP = await getPublicIP();
+    await executeQuery(
+        `INSERT INTO storage_domains (id, domain, verified, nginx_enabled, updated_at)
+         VALUES (1, $1, FALSE, FALSE, NOW())
+         ON CONFLICT (id) DO UPDATE SET domain=$1, verified=FALSE, nginx_enabled=FALSE, updated_at=NOW()`,
+        [clean]
+    );
+    res.json({ ok: true, domain: clean, serverIP });
+});
+
+// POST /storage/domain/verify — DNS check
+router.post('/domain/verify', async (_req, res) => {
+    const { rows } = await executeQuery('SELECT * FROM storage_domains WHERE id = 1');
+    if (!rows[0]) return res.status(400).json({ message: 'No domain configured' });
+    const { domain } = rows[0];
+    const serverIP = await getPublicIP();
+    let resolved: string[] = [];
+    try {
+        resolved = await dns.resolve4(domain);
+    } catch (err: any) {
+        return res.json({ verified: false, domain, resolved: [], serverIP, reason: `DNS not found: ${err.message}` });
+    }
+    const verified = !!(serverIP && resolved.includes(serverIP));
+    if (verified) {
+        await executeQuery('UPDATE storage_domains SET verified=TRUE, updated_at=NOW() WHERE id=1');
+    }
+    res.json({ verified, domain, resolved, serverIP });
+});
+
+// POST /storage/domain/nginx — write nginx config and reload
+router.post('/domain/nginx', async (_req, res) => {
+    if (!dockerOk()) return res.status(503).json({ message: 'Docker not available' });
+    const { rows } = await executeQuery('SELECT * FROM storage_domains WHERE id = 1');
+    if (!rows[0]) return res.status(400).json({ message: 'No domain configured' });
+    if (!rows[0].verified) return res.status(400).json({ message: 'Domain not verified yet' });
+    const cfg = await getConfig();
+    if (!cfg) return res.status(400).json({ message: 'MinIO not connected' });
+    try { await getDocker().getContainer(NGINX_CONTAINER).inspect(); }
+    catch { return res.status(503).json({ message: `Nginx container '${NGINX_CONTAINER}' not found` }); }
+
+    const { domain } = rows[0];
+    const upstream = cfg.endpoint;
+    const nginxConf = `# Docklet MinIO - ${domain}\nserver {\n    listen 80;\n    server_name ${domain};\n    ignore_invalid_headers off;\n    client_max_body_size 0;\n    proxy_buffering off;\n    proxy_request_buffering off;\n\n    location / {\n        proxy_pass http://${upstream}:9000;\n        proxy_set_header Host $http_host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_connect_timeout 300;\n        proxy_http_version 1.1;\n        proxy_set_header Connection "";\n        chunked_transfer_encoding off;\n    }\n}\n`;
+    const b64 = Buffer.from(nginxConf).toString('base64');
+    const cmd = `echo '${b64}' | base64 -d > ${NGINX_CONF_PATH} && nginx -t 2>&1 && nginx -s reload`;
+    try {
+        const out = await execInContainer(NGINX_CONTAINER, cmd);
+        if (out.includes('failed') || out.includes('error')) {
+            return res.status(500).json({ message: `Nginx config error: ${out}` });
+        }
+        await executeQuery('UPDATE storage_domains SET nginx_enabled=TRUE, updated_at=NOW() WHERE id=1');
+        res.json({ ok: true, domain });
+    } catch (err: any) {
+        res.status(500).json({ message: `Nginx setup failed: ${err.message}` });
+    }
+});
+
+// DELETE /storage/domain — remove domain + nginx config
+router.delete('/domain', async (_req, res) => {
+    const { rows } = await executeQuery('SELECT * FROM storage_domains WHERE id = 1');
+    if (rows[0]?.nginx_enabled && dockerOk()) {
+        try { await execInContainer(NGINX_CONTAINER, `rm -f ${NGINX_CONF_PATH} && nginx -s reload`); }
+        catch { /* best-effort */ }
+    }
+    await executeQuery('DELETE FROM storage_domains WHERE id = 1');
+    res.json({ ok: true });
+});
+
+// ── Bucket Policy ─────────────────────────────────────────────────────────────
+router.get('/buckets/:bucket/policy', async (req, res) => {
+    const client = await requireClient(res);
+    if (!client) return;
+    const bucket = String(req.params.bucket);
+    try {
+        const result = await client.send(new GetBucketPolicyCommand({ Bucket: bucket }));
+        const policy = JSON.parse(result.Policy || '{}');
+        const isPublic = (policy.Statement || []).some((s: any) =>
+            s.Effect === 'Allow' &&
+            (s.Principal === '*' || s.Principal?.AWS === '*' || (Array.isArray(s.Principal?.AWS) && s.Principal.AWS.includes('*'))) &&
+            [s.Action].flat().some((a: string) => a === 's3:GetObject' || a === 's3:*')
+        );
+        res.json({ isPublic });
+    } catch (err: any) {
+        if (err.name === 'NoSuchBucketPolicy' || err.Code === 'NoSuchBucketPolicy') return res.json({ isPublic: false });
+        res.status(500).json({ message: err.message });
+    }
+});
+
+router.put('/buckets/:bucket/policy', async (req, res) => {
+    const { public: makePublic } = req.body;
+    const client = await requireClient(res);
+    if (!client) return;
+    const bucket = String(req.params.bucket);
+    try {
+        if (makePublic) {
+            await client.send(new PutBucketPolicyCommand({
+                Bucket: bucket,
+                Policy: JSON.stringify({
+                    Version: '2012-10-17',
+                    Statement: [{ Effect: 'Allow', Principal: { AWS: ['*'] }, Action: ['s3:GetObject'], Resource: [`arn:aws:s3:::${bucket}/*`] }],
+                }),
+            }));
+        } else {
+            await client.send(new DeleteBucketPolicyCommand({ Bucket: bucket }));
+        }
+        res.json({ ok: true, isPublic: !!makePublic });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ── Share Links ───────────────────────────────────────────────────────────────
+router.post('/buckets/:bucket/files/share', async (req, res) => {
+    const { key, expiresIn } = req.body;
+    if (!key) return res.status(400).json({ message: 'key is required' });
+    const expiry = Math.min(Math.max(parseInt(String(expiresIn)) || 3600, 60), 604800);
+    const cfg = await getConfig();
+    if (!cfg) return res.status(503).json({ message: 'Not connected' });
+    try {
+        const url = await getSignedUrl(
+            buildClient(cfg),
+            new GetObjectCommand({ Bucket: String(req.params.bucket), Key: key }),
+            { expiresIn: expiry }
+        );
+        res.json({ url, expiresIn: expiry, expiresAt: new Date(Date.now() + expiry * 1000).toISOString() });
     } catch (err: any) { res.status(500).json({ message: err.message }); }
 });
 

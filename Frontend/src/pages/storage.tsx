@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { Sun, Moon, Database, Plus, Trash2, RefreshCw, Upload, Download, Pencil, Search, X, FolderOpen, File, FileText, FileImage, FileCode, Archive, CheckSquare, Square, ChevronRight, Loader2, Unplug, Link2, Container, Zap, CheckCircle2, Circle } from "lucide-react";
+import { Sun, Moon, Database, Plus, Trash2, RefreshCw, Upload, Download, Pencil, Search, X, FolderOpen, File, FileText, FileImage, FileCode, Archive, CheckSquare, Square, ChevronRight, Loader2, Unplug, Link2, Container, Zap, CheckCircle2, Circle, Globe, Shield, ShieldCheck, Share2, Copy, ExternalLink, Timer, Lock, Unlock, Check, AlertCircle, Server } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,10 +17,12 @@ import { useTheme } from "@/hooks/use-theme";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetStorageConnection, useGetStorageBuckets, useGetStorageFiles,
-  useGetStorageInstance,
+  useGetStorageInstance, useGetStorageDomain,
   storageConnect, storageDisconnect, storageCreateBucket, storageDeleteBucket,
   storageDeleteFiles, storageRenameFile, storageDownloadUrl, storageUploadFile,
   storageCreateInstance, storageInstanceHealth, storageDestroyInstance,
+  storageAddDomain, storageVerifyDomain, storageSetupNginx, storageRemoveDomain,
+  storageGetBucketPolicy, storageSetBucketPolicy, storageShareFile,
   type StorageBucket, type StorageFile,
 } from "@/api/client";
 
@@ -293,6 +295,338 @@ function CreateInstanceDialog({ open, onClose, onCreated }: { open: boolean; onC
   );
 }
 
+// ── Domain Panel ──────────────────────────────────────────────────────────────
+function DomainPanel() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useGetStorageDomain();
+  const domain = data?.domain;
+  const serverIP = data?.serverIP || "";
+
+  const [domainInput, setDomainInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{ verified: boolean; resolved: string[]; reason?: string } | null>(null);
+  const [copied, setCopied] = useState("");
+
+  function copyText(text: string, key: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(""), 2000);
+  }
+
+  async function handleAddDomain(e: React.FormEvent) {
+    e.preventDefault();
+    if (!domainInput.trim()) return;
+    setBusy(true);
+    try {
+      await storageAddDomain(domainInput.trim());
+      toast.success("Domain saved");
+      setDomainInput("");
+      qc.invalidateQueries({ queryKey: ["storage-domain"] });
+    } catch (err: any) { toast.error(err.message); }
+    finally { setBusy(false); }
+  }
+
+  async function handleVerify() {
+    setBusy(true);
+    setVerifyResult(null);
+    try {
+      const r = await storageVerifyDomain();
+      setVerifyResult(r);
+      if (r.verified) { toast.success("Domain verified!"); qc.invalidateQueries({ queryKey: ["storage-domain"] }); }
+      else toast.error(r.reason || "DNS does not point to your server yet");
+    } catch (err: any) { toast.error(err.message); }
+    finally { setBusy(false); }
+  }
+
+  async function handleNginx() {
+    setBusy(true);
+    try {
+      await storageSetupNginx();
+      toast.success("Nginx proxy configured — domain is live");
+      qc.invalidateQueries({ queryKey: ["storage-domain"] });
+    } catch (err: any) { toast.error(err.message); }
+    finally { setBusy(false); }
+  }
+
+  async function handleRemove() {
+    setBusy(true);
+    try {
+      await storageRemoveDomain();
+      toast.success("Domain removed");
+      qc.invalidateQueries({ queryKey: ["storage-domain"] });
+    } catch (err: any) { toast.error(err.message); }
+    finally { setBusy(false); }
+  }
+
+  if (isLoading) return <div className="flex items-center gap-2 text-xs text-muted-foreground p-4"><Loader2 className="w-3 h-3 animate-spin" />Loading domain info…</div>;
+
+  const dnsRecords = serverIP ? [
+    { type: "A", name: "@", value: serverIP, note: "Root domain" },
+    { type: "A", name: "www", value: serverIP, note: "WWW subdomain" },
+    { type: "A", name: domain?.domain.split(".")[0] || "storage", value: serverIP, note: "Custom subdomain" },
+  ] : [];
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      {/* Server IP card */}
+      <Card className="bg-background border-border shadow-none rounded-xl">
+        <CardContent className="p-4 flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-muted"><Server className="w-4 h-4 text-muted-foreground" /></div>
+          <div>
+            <p className="text-xs font-medium text-foreground">Your Server IP</p>
+            {serverIP ? (
+              <div className="flex items-center gap-2">
+                <code className="text-xs font-mono text-primary">{serverIP}</code>
+                <button onClick={() => copyText(serverIP, "ip")} className="text-muted-foreground hover:text-foreground">
+                  {copied === "ip" ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+            ) : <p className="text-xs text-muted-foreground">Could not detect — check your VPS firewall</p>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Step 1: Add domain */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${domain ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground border border-border"}`}>
+            {domain ? <Check className="w-3 h-3" /> : "1"}
+          </div>
+          <h3 className="text-sm font-medium">Connect Domain</h3>
+          {domain && <button onClick={handleRemove} disabled={busy} className="text-xs text-muted-foreground hover:text-destructive ml-auto">Remove</button>}
+        </div>
+        {!domain ? (
+          <form onSubmit={handleAddDomain} className="flex gap-2 ml-7">
+            <Input placeholder="storage.yourdomain.com" value={domainInput} onChange={e => setDomainInput(e.target.value)} className="h-8 text-xs flex-1" required />
+            <Button type="submit" size="sm" disabled={busy} className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+            </Button>
+          </form>
+        ) : (
+          <div className="ml-7 flex items-center gap-2">
+            <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
+            <code className="text-xs font-mono text-foreground">{domain.domain}</code>
+            <Badge variant="outline" className={`text-[10px] px-2 py-0 rounded-full ${domain.verified ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" : "text-amber-600 bg-amber-500/10 border-amber-500/20"}`}>
+              {domain.verified ? "Verified" : "Unverified"}
+            </Badge>
+          </div>
+        )}
+      </div>
+
+      {/* Step 2: DNS Records */}
+      {domain && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${domain.verified ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground border border-border"}`}>
+              {domain.verified ? <Check className="w-3 h-3" /> : "2"}
+            </div>
+            <h3 className="text-sm font-medium">Add DNS Records in Cloudflare</h3>
+          </div>
+          {!domain.verified && (
+            <div className="ml-7 space-y-3">
+              <p className="text-xs text-muted-foreground">Create these A records in your Cloudflare DNS dashboard:</p>
+              <div className="rounded-xl border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40 border-b border-border">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Type</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Name</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Value</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dnsRecords.map((r, i) => (
+                      <tr key={i} className="border-b border-border/50 last:border-0">
+                        <td className="px-3 py-2"><Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">{r.type}</Badge></td>
+                        <td className="px-3 py-2 font-mono text-foreground">{r.name}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1.5">
+                            <code className="font-mono text-primary">{r.value || "..."}</code>
+                            {r.value && <button onClick={() => copyText(r.value, `dns-${i}`)} className="text-muted-foreground hover:text-foreground">{copied === `dns-${i}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}</button>}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{r.note}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center gap-2">
+                {verifyResult && !verifyResult.verified && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    {verifyResult.reason || `Resolved to ${verifyResult.resolved.join(", ") || "nothing"} — expected ${serverIP}`}
+                  </p>
+                )}
+                <Button size="sm" onClick={handleVerify} disabled={busy} className="h-7 text-xs ml-auto border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
+                  {busy ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Checking…</> : "Verify Domain"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Step 3: Nginx */}
+      {domain?.verified && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${domain.nginx_enabled ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground border border-border"}`}>
+              {domain.nginx_enabled ? <Check className="w-3 h-3" /> : "3"}
+            </div>
+            <h3 className="text-sm font-medium">Activate Nginx Proxy</h3>
+          </div>
+          <div className="ml-7">
+            {domain.nginx_enabled ? (
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-2">
+                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
+                  <CheckCircle2 className="w-4 h-4" />Domain proxy is active
+                </div>
+                <p className="text-xs text-muted-foreground">Public buckets are now accessible at:</p>
+                <div className="flex items-center gap-2">
+                  <code className="text-xs font-mono text-primary">http://{domain.domain}/{"<bucket>/<file>"}</code>
+                  <a href={`http://${domain.domain}`} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground">
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Configure Nginx to proxy <strong className="text-foreground">{domain.domain}</strong> → MinIO. This updates the <code className="font-mono bg-muted px-1 rounded text-[10px]">docklet-nginx</code> container automatically.</p>
+                <Button size="sm" onClick={handleNginx} disabled={busy} className="h-7 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
+                  {busy ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Setting up…</> : <><Globe className="w-3 h-3 mr-1.5" />Activate Nginx Proxy</>}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Share Dialog ───────────────────────────────────────────────────────────────
+const EXPIRY_PRESETS = [
+  { label: "1 hour", value: 3600 },
+  { label: "8 hours", value: 28800 },
+  { label: "24 hours", value: 86400 },
+  { label: "7 days", value: 604800 },
+];
+
+function ShareDialog({ bucket, file, open, onClose, isPublic, domain, serverIP }: {
+  bucket: string; file: StorageFile | null; open: boolean; onClose: () => void;
+  isPublic: boolean; domain: string | null; serverIP: string;
+}) {
+  const [expiresIn, setExpiresIn] = useState(3600);
+  const [shareUrl, setShareUrl] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState("");
+
+  useEffect(() => { if (!open) { setShareUrl(""); setExpiresAt(""); } }, [open]);
+
+  function copyText(text: string, key: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(""), 2000);
+  }
+
+  async function generate() {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const r = await storageShareFile(bucket, file.key, expiresIn);
+      setShareUrl(r.url);
+      setExpiresAt(r.expiresAt);
+    } catch (err: any) { toast.error(err.message); }
+    finally { setBusy(false); }
+  }
+
+  const publicUrl = file ? (domain ? `http://${domain}/${bucket}/${file.key}` : serverIP ? `http://${serverIP}:9000/${bucket}/${file.key}` : null) : null;
+  const name = file?.key.split("/").pop() || file?.key || "";
+
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-medium flex items-center gap-2">
+            <Share2 className="w-4 h-4 text-muted-foreground" />Share File
+          </DialogTitle>
+          <DialogDescription className="text-xs font-mono truncate">{name}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5 pt-1">
+          {/* Private share link */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Lock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <span className="text-xs font-medium">Private Share Link</span>
+              <Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full ml-auto">Signed URL</Badge>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {EXPIRY_PRESETS.map(p => (
+                <button key={p.value} onClick={() => { setExpiresIn(p.value); setShareUrl(""); }}
+                  className={`px-2 py-1.5 rounded-lg text-[11px] border transition-all ${expiresIn === p.value ? "border-primary bg-primary/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"}`}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            {shareUrl ? (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 rounded-lg bg-muted/40 border border-border px-3 py-2">
+                  <code className="text-[10px] font-mono text-primary flex-1 truncate">{shareUrl}</code>
+                  <button onClick={() => copyText(shareUrl, "private")} className="text-muted-foreground hover:text-foreground shrink-0">
+                    {copied === "private" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                  <a href={shareUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground shrink-0">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  <Timer className="w-3 h-3" />Expires {format(new Date(expiresAt), "MMM dd, yyyy 'at' HH:mm")}
+                </p>
+              </div>
+            ) : (
+              <Button size="sm" onClick={generate} disabled={busy} className="h-7 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
+                {busy ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Generating…</> : <><Timer className="w-3 h-3 mr-1.5" />Generate Link</>}
+              </Button>
+            )}
+          </div>
+
+          {/* Public access */}
+          {publicUrl && isPublic && (
+            <div className="border-t border-border pt-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <Unlock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                <span className="text-xs font-medium">Public Direct URL</span>
+                <Badge variant="outline" className="text-[10px] px-2 py-0 rounded-full ml-auto text-emerald-600 bg-emerald-500/10 border-emerald-500/20">Public Bucket</Badge>
+              </div>
+              <div className="flex items-center gap-2 rounded-lg bg-muted/40 border border-border px-3 py-2">
+                <code className="text-[10px] font-mono text-primary flex-1 truncate">{publicUrl}</code>
+                <button onClick={() => copyText(publicUrl, "public")} className="text-muted-foreground hover:text-foreground shrink-0">
+                  {copied === "public" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                <a href={publicUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground shrink-0">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+            </div>
+          )}
+
+          {publicUrl && !isPublic && (
+            <div className="border-t border-border pt-4">
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5" />This bucket is private. Toggle to <strong className="text-foreground">Public</strong> in the Files view to enable direct URL access.
+              </p>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Upload Zone ───────────────────────────────────────────────────────────────
 interface UploadState { file: File; progress: number; done: boolean; error?: string }
 
@@ -428,17 +762,34 @@ export default function StoragePage() {
   const connected = conn?.connected === true;
   const { data: instance } = useGetStorageInstance();
   const isManaged = instance?.running === true;
+  const { data: domainData } = useGetStorageDomain();
+  const activeDomain = domainData?.domain?.nginx_enabled ? domainData.domain.domain : null;
+  const serverIP = domainData?.serverIP || "";
   const { data: bucketsData, isLoading: bucketsLoading } = useGetStorageBuckets(connected);
 
+  const [activeView, setActiveView] = useState<"files" | "domain">("files");
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
+  const [selectedBucketIsPublic, setSelectedBucketIsPublic] = useState<boolean | null>(null);
+  const [policyLoading, setPolicyLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const { data: filesData, isLoading: filesLoading, refetch: refetchFiles } = useGetStorageFiles(selectedBucket);
 
+  // Load bucket policy when selection changes
+  useEffect(() => {
+    if (!selectedBucket) { setSelectedBucketIsPublic(null); return; }
+    setPolicyLoading(true);
+    storageGetBucketPolicy(selectedBucket)
+      .then(r => setSelectedBucketIsPublic(r.isPublic))
+      .catch(() => setSelectedBucketIsPublic(false))
+      .finally(() => setPolicyLoading(false));
+  }, [selectedBucket]);
+
   // Dialogs
   const [showConnect, setShowConnect] = useState(false);
   const [showCreateInstance, setShowCreateInstance] = useState(false);
+  const [shareFile, setShareFile] = useState<StorageFile | null>(null);
   const [showCreateBucket, setShowCreateBucket] = useState(false);
   const [bucketName, setBucketName] = useState("");
   const [showUpload, setShowUpload] = useState(false);
@@ -468,6 +819,16 @@ export default function StoragePage() {
       toast.success("MinIO instance stopped and removed");
       refresh();
       qc.invalidateQueries({ queryKey: ["storage-instance"] });
+    } catch (err: any) { toast.error(err.message); }
+  }
+
+  async function handleTogglePolicy() {
+    if (!selectedBucket || selectedBucketIsPublic === null) return;
+    const next = !selectedBucketIsPublic;
+    try {
+      await storageSetBucketPolicy(selectedBucket, next);
+      setSelectedBucketIsPublic(next);
+      toast.success(next ? `${selectedBucket} is now public` : `${selectedBucket} is now private`);
     } catch (err: any) { toast.error(err.message); }
   }
 
@@ -589,6 +950,22 @@ export default function StoragePage() {
             </p>
           </div>
 
+          {/* Tab bar — only when connected */}
+          {connected && (
+            <div className="flex gap-0.5 border-b border-border mb-6 -mt-2">
+              {[{ key: "files", label: "Files", icon: <Database className="w-3 h-3" /> }, { key: "domain", label: "Domain", icon: <Globe className="w-3 h-3" /> }].map(t => (
+                <button key={t.key} onClick={() => setActiveView(t.key as any)}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition-all ${activeView === t.key ? "border-primary text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+                  {t.icon}{t.label}
+                  {t.key === "domain" && domainData?.domain?.nginx_enabled && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 ml-0.5" />}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Domain view */}
+          {connected && activeView === "domain" && <DomainPanel />}
+
           {/* Not connected */}
           {!connLoading && !connected && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
@@ -639,7 +1016,7 @@ export default function StoragePage() {
           )}
 
           {/* Connected: split layout */}
-          {connected && (
+          {connected && activeView === "files" && (
             <div className="flex gap-4 h-[calc(100vh-260px)] min-h-[500px]">
               {/* Bucket list */}
               <div className="w-56 shrink-0 flex flex-col gap-3">
@@ -666,6 +1043,11 @@ export default function StoragePage() {
                       >
                         <FolderOpen className="w-3.5 h-3.5 shrink-0" />
                         <span className="text-xs font-medium truncate flex-1">{b.name}</span>
+                        {selectedBucket === b.name && !policyLoading && selectedBucketIsPublic !== null && (
+                          <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full border font-medium mr-0.5 opacity-80" style={selectedBucketIsPublic ? { color: "#16a34a", background: "rgba(22,163,74,.08)", borderColor: "rgba(22,163,74,.25)" } : { color: "#71717a", background: "transparent", borderColor: "rgba(113,113,122,.25)" }}>
+                            {selectedBucketIsPublic ? "public" : "private"}
+                          </span>
+                        )}
                         <button
                           className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-0.5 rounded"
                           onClick={e => { e.stopPropagation(); setDeleteBucket(b.name); }}
@@ -708,6 +1090,14 @@ export default function StoragePage() {
                         {search && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setSearch("")}><X className="w-3 h-3" /></button>}
                       </div>
                       <div className="flex items-center gap-1 ml-auto">
+                        {/* Policy toggle */}
+                        {selectedBucketIsPublic !== null && !policyLoading && (
+                          <button onClick={handleTogglePolicy} title={selectedBucketIsPublic ? "Bucket is public — click to make private" : "Bucket is private — click to make public"}
+                            className="flex items-center gap-1 h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-all border border-transparent hover:border-border">
+                            {selectedBucketIsPublic ? <Unlock className="w-3.5 h-3.5 text-emerald-500" /> : <Lock className="w-3.5 h-3.5" />}
+                            <span className="hidden sm:inline">{selectedBucketIsPublic ? "Public" : "Private"}</span>
+                          </button>
+                        )}
                         {selected.size > 0 && (
                           <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteFiles(Array.from(selected))}>
                             <Trash2 className="w-3.5 h-3.5 mr-1" />Delete ({selected.size})
@@ -770,6 +1160,9 @@ export default function StoragePage() {
                                 <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{format(new Date(f.lastModified), "MMM dd, HH:mm")}</td>
                                 <td className="px-4 py-2.5 text-right">
                                   <div className="flex items-center justify-end gap-0.5">
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Share" onClick={() => setShareFile(f)}>
+                                      <Share2 className="w-3.5 h-3.5" />
+                                    </Button>
                                     <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Download" onClick={() => handleDownload(f)}>
                                       <Download className="w-3.5 h-3.5" />
                                     </Button>
@@ -839,6 +1232,17 @@ export default function StoragePage() {
           onDone={() => { qc.invalidateQueries({ queryKey: ["storage-files"] }); refetchFiles(); }}
         />
       )}
+
+      {/* Share Dialog */}
+      <ShareDialog
+        bucket={selectedBucket || ""}
+        file={shareFile}
+        open={!!shareFile}
+        onClose={() => setShareFile(null)}
+        isPublic={selectedBucketIsPublic === true}
+        domain={activeDomain}
+        serverIP={serverIP}
+      />
 
       {selectedBucket && renameFile && (
         <RenameDialog

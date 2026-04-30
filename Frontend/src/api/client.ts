@@ -745,6 +745,53 @@ export async function storageDestroyInstance(): Promise<{ ok: boolean }> {
   return apiFetch("/storage/instance", { method: "DELETE" });
 }
 
+// ── Domain ────────────────────────────────────────────────────────────────────
+export type StorageDomain = { id: number; domain: string; verified: boolean; nginx_enabled: boolean; updated_at: string };
+
+export function useGetStorageDomain() {
+  return useQuery({
+    queryKey: ["storage-domain"],
+    queryFn: () => apiFetch<{ domain: StorageDomain | null; serverIP: string }>("/storage/domain"),
+    staleTime: 10000,
+  });
+}
+
+export async function storageAddDomain(domain: string) {
+  return apiFetch<{ ok: boolean; domain: string; serverIP: string }>("/storage/domain", { method: "POST", body: JSON.stringify({ domain }) });
+}
+
+export async function storageVerifyDomain() {
+  return apiFetch<{ verified: boolean; domain: string; resolved: string[]; serverIP: string; reason?: string }>("/storage/domain/verify", { method: "POST" });
+}
+
+export async function storageSetupNginx() {
+  return apiFetch<{ ok: boolean; domain: string }>("/storage/domain/nginx", { method: "POST" });
+}
+
+export async function storageRemoveDomain() {
+  return apiFetch<{ ok: boolean }>("/storage/domain", { method: "DELETE" });
+}
+
+// ── Bucket Policy ─────────────────────────────────────────────────────────────
+export async function storageGetBucketPolicy(bucket: string) {
+  return apiFetch<{ isPublic: boolean }>(`/storage/buckets/${encodeURIComponent(bucket)}/policy`);
+}
+
+export async function storageSetBucketPolicy(bucket: string, isPublic: boolean) {
+  return apiFetch<{ ok: boolean; isPublic: boolean }>(`/storage/buckets/${encodeURIComponent(bucket)}/policy`, {
+    method: "PUT",
+    body: JSON.stringify({ public: isPublic }),
+  });
+}
+
+// ── Share ─────────────────────────────────────────────────────────────────────
+export async function storageShareFile(bucket: string, key: string, expiresIn: number) {
+  return apiFetch<{ url: string; expiresIn: number; expiresAt: string }>(`/storage/buckets/${encodeURIComponent(bucket)}/files/share`, {
+    method: "POST",
+    body: JSON.stringify({ key, expiresIn }),
+  });
+}
+
 export async function storageUploadFile(bucket: string, file: File, key: string, onProgress?: (pct: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const token = localStorage.getItem("nextbase_token");
