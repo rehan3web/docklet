@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Terminal as TerminalIcon, Sparkles, Settings, AlertTriangle, Loader2, Trash2, Sun, Moon, Zap } from "lucide-react";
+import { Terminal as TerminalIcon, Sparkles, Settings, AlertTriangle, Loader2, Trash2, Sun, Moon, Zap, SendHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -464,14 +464,40 @@ export default function TerminalPage() {
                   </span>
                 </div>
               )}
-              <Textarea
-                value={aiPrompt}
-                onChange={e => setAiPrompt(e.target.value)}
-                placeholder="e.g. show me the 5 largest files in the current directory"
-                className="text-xs min-h-[72px] resize-none font-mono placeholder:text-muted-foreground/40"
-                disabled={!settings?.configured || aiLoading}
-                onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleAiGenerate(); }}
-              />
+              {/* Textarea with embedded send button */}
+              <div className="relative">
+                <Textarea
+                  value={aiPrompt}
+                  onChange={e => setAiPrompt(e.target.value)}
+                  placeholder="e.g. show me the 5 largest files in the current directory"
+                  className="text-xs min-h-[88px] resize-none font-mono placeholder:text-muted-foreground/40 pr-12 pb-10"
+                  disabled={!settings?.configured || aiLoading}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleAiGenerate();
+                    }
+                  }}
+                />
+                <button
+                  onClick={handleAiGenerate}
+                  disabled={!settings?.configured || aiLoading || !aiPrompt.trim()}
+                  className={`absolute bottom-2.5 right-2.5 w-7 h-7 flex items-center justify-center rounded-md transition-all
+                    border border-black/10 dark:border-white/10 shadow-none
+                    ${(!settings?.configured || !aiPrompt.trim())
+                      ? "bg-muted text-muted-foreground cursor-not-allowed opacity-50"
+                      : "bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] cursor-pointer"
+                    }`}
+                >
+                  {aiLoading
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <SendHorizontal className="w-3.5 h-3.5" />
+                  }
+                </button>
+                <span className="absolute bottom-2.5 left-3 text-[10px] text-muted-foreground/50 select-none pointer-events-none">
+                  Enter to send · Shift+Enter for new line
+                </span>
+              </div>
               {aiGenerated && (
                 <div className="rounded-lg border border-[#e0e0e0] dark:border-[#252525] bg-[#f5f5f5] dark:bg-[#0d0d0d] overflow-hidden">
                   {!aiGenerated.safe && (
@@ -488,16 +514,6 @@ export default function TerminalPage() {
                   </div>
                 </div>
               )}
-              <Button
-                className="w-full h-9 text-sm gap-2 border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none"
-                onClick={handleAiGenerate}
-                disabled={!settings?.configured || aiLoading || !aiPrompt.trim()}
-              >
-                {aiLoading
-                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…</>
-                  : <><Sparkles className="w-3.5 h-3.5" /> Generate Command</>
-                }
-              </Button>
             </div>
           </div>
         </main>
