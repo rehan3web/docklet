@@ -67,50 +67,48 @@ function TaskLogsDialog({ task, open, onClose }: { task: ScheduledTask; open: bo
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) { onClose(); setSelectedRun(null); } }}>
-      <DialogContent className="sm:max-w-[700px] max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden">
+      <DialogContent className="sm:max-w-[700px] p-0 gap-0 overflow-hidden">
         <DialogHeader className="p-5 pb-3 border-b border-border">
-          <DialogTitle className="text-sm font-medium">Deployment Run Logs — {task.name}</DialogTitle>
+          <DialogTitle className="text-sm font-medium">Run Logs — {task.name}</DialogTitle>
           <DialogDescription className="text-xs">Recent runs, newest first. Click a run to see its output.</DialogDescription>
         </DialogHeader>
-        <div className="flex flex-1 overflow-hidden min-h-0">
+
+        <div className="flex h-[420px] overflow-hidden">
           {/* Run list */}
-          <div className="w-56 shrink-0 border-r border-border flex flex-col">
-            <ScrollArea className="flex-1">
-              <div className="p-2 space-y-1">
-                {runs.length === 0 && (
-                  <p className="text-xs text-muted-foreground p-3 text-center">No runs yet</p>
-                )}
-                {runs.map((run) => (
-                  <button
-                    key={run.id}
-                    onClick={() => setSelectedRun(run)}
-                    className={`w-full text-left p-2.5 rounded-md transition-colors border text-xs ${selectedRun?.id === run.id ? "bg-muted/60 border-border" : "border-transparent hover:bg-muted/40"}`}
-                  >
-                    <div className="flex items-center justify-between gap-1 mb-1">
-                      <span className="font-mono text-[10px] text-muted-foreground">#{run.id}</span>
-                      <RunStatusBadge status={run.status} />
-                    </div>
-                    <p className="font-mono text-[10px] text-muted-foreground">{format(new Date(run.started_at), "MMM dd, HH:mm:ss")}</p>
-                    {run.finished_at && (
-                      <p className="font-mono text-[10px] text-muted-foreground/60">
-                        {((run.finished_at - run.started_at) / 1000).toFixed(1)}s
-                      </p>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </ScrollArea>
+          <div className="w-52 shrink-0 border-r border-border overflow-y-auto">
+            <div className="p-2 space-y-1">
+              {runs.length === 0 && (
+                <p className="text-xs text-muted-foreground p-3 text-center">No runs yet</p>
+              )}
+              {runs.map((run) => (
+                <button
+                  key={run.id}
+                  onClick={() => setSelectedRun(run)}
+                  className={`w-full text-left p-2.5 rounded-md transition-colors border text-xs ${selectedRun?.id === run.id ? "bg-muted/60 border-border" : "border-transparent hover:bg-muted/40"}`}
+                >
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="font-mono text-[10px] text-muted-foreground">#{run.id}</span>
+                    <RunStatusBadge status={run.status} />
+                  </div>
+                  <p className="font-mono text-[10px] text-muted-foreground">{format(new Date(run.started_at), "MMM dd, HH:mm:ss")}</p>
+                  {run.finished_at && (
+                    <p className="font-mono text-[10px] text-muted-foreground/60">
+                      {((run.finished_at - run.started_at) / 1000).toFixed(1)}s
+                    </p>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
+
           {/* Log output */}
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 overflow-y-auto min-w-0 bg-[#f8f8f8] dark:bg-[#0d0d0d]">
             {selectedRun ? (
-              <ScrollArea className="flex-1">
-                <pre className="font-mono text-[11px] p-4 whitespace-pre-wrap text-foreground bg-[#f8f8f8] dark:bg-[#0d0d0d] min-h-full leading-relaxed">
-                  {selectedRun.output || "(no output)"}
-                </pre>
-              </ScrollArea>
+              <pre className="font-mono text-[11px] p-4 whitespace-pre-wrap text-foreground leading-relaxed h-full">
+                {selectedRun.output || "(no output)"}
+              </pre>
             ) : (
-              <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground p-6 text-center">
+              <div className="h-full flex items-center justify-center text-xs text-muted-foreground p-6 text-center">
                 <div>
                   <FileText className="w-8 h-8 mx-auto mb-2 opacity-20" />
                   <p>Select a run to view its output</p>
@@ -119,6 +117,7 @@ function TaskLogsDialog({ task, open, onClose }: { task: ScheduledTask; open: bo
             )}
           </div>
         </div>
+
         <div className="p-4 border-t border-border flex justify-end">
           <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => { onClose(); setSelectedRun(null); }}>Close</Button>
         </div>
