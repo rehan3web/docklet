@@ -1,0 +1,64 @@
+oot@root:~/docklet# git pull
+remote: Enumerating objects: 19, done.
+remote: Counting objects: 100% (19/19), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 10 (delta 9), reused 10 (delta 9), pack-reused 0 (from 0)
+Unpacking objects: 100% (10/10), 1.26 KiB | 215.00 KiB/s, done.
+From https://github.com/rehan3web/docklet
+   fea49e0..1f8ac44  main       -> origin/main
+Updating fea49e0..1f8ac44
+Fast-forward
+ Backend/src/routes/storage.ts  |  8 ++++++--
+ Frontend/src/pages/storage.tsx | 11 +++++++++--
+ 2 files changed, 15 insertions(+), 4 deletions(-)
+root@root:~/docklet# docker compose up -d --build docklet-server
+
+no configuration file provided: not found
+root@root:~/docklet# docker compose up -d --build docklet-server
+
+no configuration file provided: not found
+root@root:~/docklet# docker compose up -d --build docklet-server
+no configuration file provided: not found
+root@root:~/docklet# docker ps
+CONTAINER ID   IMAGE                      COMMAND                  CREATED          STATUS                   PORTS                                                                          NAMES
+3e8a360a1430   nginx:alpine               "/docker-entrypoint.…"   6 minutes ago    Up 6 minutes             0.0.0.0:80->80/tcp, [::]:80->80/tcp, 0.0.0.0:443->443/tcp, [::]:443->443/tcp   docklet-nginx
+1a855d655b92   haproxy:alpine             "docker-entrypoint.s…"   6 minutes ago    Up 6 minutes                                                                                            docklet-haproxy
+83945a003765   docklet-docklet-client     "/docker-entrypoint.…"   6 minutes ago    Up 6 minutes             0.0.0.0:3000->80/tcp                                                           docklet-client
+e42e899f6e64   docklet-docklet-server     "docker-entrypoint.s…"   6 minutes ago    Up 6 minutes             127.0.0.1:3001->3001/tcp                                                       docklet-server
+a33c444cb754   edoburu/pgbouncer:latest   "/entrypoint.sh /usr…"   6 minutes ago    Up 6 minutes             127.0.0.1:16543->5432/tcp                                                      docklet-pooler
+1a56a7aa1939   postgres:15                "docker-entrypoint.s…"   6 minutes ago    Up 6 minutes (healthy)   127.0.0.1:15432->5432/tcp                                                      docklet-db
+19944e548c30   minio/minio                "/usr/bin/docker-ent…"   43 minutes ago   Up 43 minutes            0.0.0.0:9000-9001->9000-9001/tcp, [::]:9000-9001->9000-9001/tcp                docklet-minio
+root@root:~/docklet# docker compose -f postgres.yml up -d --build docklet-server
+[+] Building 9.3s (14/14) FINISHED                                                                                                                            
+ => [internal] load local bake definitions                                                                                                               0.0s
+ => => reading from stdin 526B                                                                                                                           0.0s
+ => [internal] load build definition from Dockerfile                                                                                                     0.0s
+ => => transferring dockerfile: 280B                                                                                                                     0.0s
+ => [internal] load metadata for docker.io/library/node:20-alpine                                                                                        0.4s
+ => [internal] load .dockerignore                                                                                                                        0.0s
+ => => transferring context: 87B                                                                                                                         0.0s
+ => [internal] load build context                                                                                                                        0.0s
+ => => transferring context: 30.15kB                                                                                                                     0.0s
+ => [1/7] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                                  0.0s
+ => => resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293                                  0.0s
+ => CACHED [2/7] RUN apk add --no-cache postgresql-client docker-cli docker-compose bash git util-linux                                                  0.0s
+ => CACHED [3/7] WORKDIR /usr/src/app                                                                                                                    0.0s
+ => CACHED [4/7] COPY package*.json ./                                                                                                                   0.0s
+ => CACHED [5/7] RUN npm install                                                                                                                         0.0s
+ => [6/7] COPY . .                                                                                                                                       0.0s
+ => [7/7] RUN npm run build                                                                                                                              8.1s
+ => exporting to image                                                                                                                                   0.4s 
+ => => exporting layers                                                                                                                                  0.2s 
+ => => exporting manifest sha256:d1b919c0e953894076212cec9f782632ae910f92abbe4ebd7118227d7ac37d69                                                        0.0s
+ => => exporting config sha256:c65bd468ea2799fadb37c3af7a71a264320402c70f71367ec691d60f28ebe16d                                                          0.0s
+ => => exporting attestation manifest sha256:bead6728d6d8288d67478da61c1c41ed935279e50056d8ec6b2bd474cce05053                                            0.1s
+ => => exporting manifest list sha256:36c761a42d1a4f8741b737eff87dfa73ea409cbc282d7f7cdb111d7385700b99                                                   0.0s
+ => => naming to docker.io/library/docklet-docklet-server:latest                                                                                         0.0s
+ => => unpacking to docker.io/library/docklet-docklet-server:latest                                                                                      0.1s
+ => resolving provenance for metadata file                                                                                                               0.0s
+[+] up 4/4
+ ✔ Image docklet-docklet-server Built                                                                                                                     9.4s
+ ✔ Container docklet-db         Healthy                                                                                                                   1.5s
+ ✔ Container docklet-pooler     Running                                                                                                                   0.0s
+ ✔ Container docklet-server     Started                                                                                                                   1.8s
+root@root:~/docklet# 
