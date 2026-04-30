@@ -479,16 +479,23 @@ function DomainPanel() {
           </div>
           <div className="ml-7">
             {domain.nginx_enabled ? (
-              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-2">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
                 <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
                   <CheckCircle2 className="w-4 h-4" />Domain proxy is active
                 </div>
-                <p className="text-xs text-muted-foreground">Public buckets are now accessible at:</p>
+                <p className="text-xs text-muted-foreground">Public buckets are accessible at:</p>
                 <div className="flex items-center gap-2">
                   <code className="text-xs font-mono text-primary">http://{domain.domain}/{"<bucket>/<file>"}</code>
                   <a href={`http://${domain.domain}`} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground">
                     <ExternalLink className="w-3 h-3" />
                   </a>
+                </div>
+                <div className="border-t border-emerald-500/20 pt-2">
+                  <Button size="sm" variant="ghost" onClick={handleNginx} disabled={busy}
+                    className="h-7 text-xs text-muted-foreground hover:text-foreground">
+                    {busy ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Re-applying…</> : <><RefreshCw className="w-3 h-3 mr-1.5" />Re-apply Nginx Config</>}
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground mt-1">Use this if the proxy isn't routing correctly — it rewrites the nginx config and reloads.</p>
                 </div>
               </div>
             ) : (

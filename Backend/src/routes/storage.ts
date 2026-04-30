@@ -346,8 +346,12 @@ router.post('/domain/nginx', async (_req, res) => {
     catch { return res.status(503).json({ message: `Nginx container '${NGINX_CONTAINER}' not found` }); }
 
     const { domain } = rows[0];
-    const upstream = cfg.endpoint;
-    const nginxConf = `# Docklet MinIO - ${domain}\nserver {\n    listen 80;\n    server_name ${domain};\n    ignore_invalid_headers off;\n    client_max_body_size 0;\n    proxy_buffering off;\n    proxy_request_buffering off;\n\n    location / {\n        proxy_pass http://${upstream}:9000;\n        proxy_set_header Host $http_host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_connect_timeout 300;\n        proxy_http_version 1.1;\n        proxy_set_header Connection "";\n        chunked_transfer_encoding off;\n    }\n}\n`;
+    // Use the public server IP (port 9000 mapped to 0.0.0.0 on the host) so that
+    // docklet-nginx can reach MinIO regardless of which Docker network it lives on.
+    const publicIP = await getPublicIP();
+    const upstream = publicIP || cfg.endpoint;
+    const upstreamPort = cfg.port || 9000;
+    const nginxConf = `# Docklet MinIO - ${domain}\nserver {\n    listen 80;\n    server_name ${domain};\n    ignore_invalid_headers off;\n    client_max_body_size 0;\n    proxy_buffering off;\n    proxy_request_buffering off;\n\n    location / {\n        proxy_pass http://${upstream}:${upstreamPort};\n        proxy_set_header Host $http_host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_connect_timeout 300;\n        proxy_http_version 1.1;\n        proxy_set_header Connection "";\n        chunked_transfer_encoding off;\n    }\n}\n`;
     const b64 = Buffer.from(nginxConf).toString('base64');
     const cmd = `echo '${b64}' | base64 -d > ${NGINX_CONF_PATH} && nginx -t 2>&1 && nginx -s reload`;
     try {
