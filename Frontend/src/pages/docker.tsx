@@ -22,9 +22,19 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { getSocket } from "@/api/socket";
 
-// ── strip ANSI escape sequences ────────────────────────────────────────────────
+// ── strip ANSI / VT escape sequences (including bracketed paste mode) ──────────
 function stripAnsi(str: string): string {
-  return str.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/\r/g, "");
+  return str
+    // CSI sequences: ESC [ ... (any params/intermediates) ... final-byte
+    .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "")
+    // OSC sequences: ESC ] ... ST or BEL
+    .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, "")
+    // 2-char ESC sequences
+    .replace(/\x1B[@-Z\\-_]/g, "")
+    // C1 control codes
+    .replace(/[\x80-\x9F]/g, "")
+    // carriage returns
+    .replace(/\r/g, "");
 }
 
 // ── Logs Dialog ───────────────────────────────────────────────────────────────
