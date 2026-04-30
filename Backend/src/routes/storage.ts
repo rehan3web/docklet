@@ -271,6 +271,43 @@ async function getPublicIP(): Promise<string> {
     return '';
 }
 
+// Build a minimal POSIX ustar tar buffer containing one file entry.
+function buildTar(filename: string, content: Buffer): Buffer {
+    const BLOCK = 512;
+    const dataBlocks = Math.ceil(content.length / BLOCK);
+    const totalBlocks = 1 + dataBlocks + 2; // header + data + 2 end-of-archive blocks
+    const tar = Buffer.alloc(totalBlocks * BLOCK, 0);
+
+    // Fill header (ustar format)
+    const hdr = tar.subarray(0, BLOCK);
+    hdr.write(filename, 0, 100, 'ascii');          // name
+    hdr.write('0000644\0', 100, 8, 'ascii');       // mode
+    hdr.write('0000000\0', 108, 8, 'ascii');       // uid
+    hdr.write('0000000\0', 116, 8, 'ascii');       // gid
+    hdr.write(content.length.toString(8).padStart(11, '0') + '\0', 124, 12, 'ascii'); // size
+    hdr.write(Math.floor(Date.now() / 1000).toString(8).padStart(11, '0') + '\0', 136, 12, 'ascii'); // mtime
+    hdr.write(' '.repeat(8), 148, 8, 'ascii');     // checksum placeholder
+    hdr.write('0', 156, 1, 'ascii');               // typeflag = regular file
+    hdr.write('ustar  \0', 257, 8, 'ascii');       // magic + version
+
+    // Compute checksum
+    let cksum = 0;
+    for (let i = 0; i < BLOCK; i++) cksum += hdr[i];
+    hdr.write(cksum.toString(8).padStart(6, '0') + '\0 ', 148, 8, 'ascii');
+
+    // Copy file data after header
+    content.copy(tar, BLOCK);
+    return tar;
+}
+
+// Write a file directly into a container using the Docker API (no shell escaping issues)
+async function writeFileToContainer(containerName: string, destDir: string, filename: string, content: string): Promise<void> {
+    const docker = getDocker();
+    const container = docker.getContainer(containerName);
+    const tarBuf = buildTar(filename, Buffer.from(content, 'utf8'));
+    await container.putArchive(tarBuf, { path: destDir });
+}
+
 async function execInContainer(name: string, cmd: string): Promise<string> {
     const docker = getDocker();
     const exec = await docker.getContainer(name).exec({
@@ -346,23 +383,69 @@ router.post('/domain/nginx', async (_req, res) => {
     catch { return res.status(503).json({ message: `Nginx container '${NGINX_CONTAINER}' not found` }); }
 
     const { domain } = rows[0];
-    // Use the public server IP (port 9000 mapped to 0.0.0.0 on the host) so that
-    // docklet-nginx can reach MinIO regardless of which Docker network it lives on.
+    // Use the public server IP so docklet-nginx can reach MinIO regardless of Docker network
     const publicIP = await getPublicIP();
     const upstream = publicIP || cfg.endpoint;
     const upstreamPort = cfg.port || 9000;
-    const nginxConf = `# Docklet MinIO - ${domain}\nserver {\n    listen 80;\n    server_name ${domain};\n    ignore_invalid_headers off;\n    client_max_body_size 0;\n    proxy_buffering off;\n    proxy_request_buffering off;\n\n    location / {\n        proxy_pass http://${upstream}:${upstreamPort};\n        proxy_set_header Host $http_host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_connect_timeout 300;\n        proxy_http_version 1.1;\n        proxy_set_header Connection "";\n        chunked_transfer_encoding off;\n    }\n}\n`;
-    const b64 = Buffer.from(nginxConf).toString('base64');
-    const cmd = `echo '${b64}' | base64 -d > ${NGINX_CONF_PATH} && nginx -t 2>&1 && nginx -s reload`;
+    const nginxConf = [
+        `# Docklet MinIO proxy — ${domain}`,
+        `server {`,
+        `    listen 80;`,
+        `    server_name ${domain};`,
+        `    ignore_invalid_headers off;`,
+        `    client_max_body_size 0;`,
+        `    proxy_buffering off;`,
+        `    proxy_request_buffering off;`,
+        ``,
+        `    location / {`,
+        `        proxy_pass http://${upstream}:${upstreamPort};`,
+        `        proxy_set_header Host $http_host;`,
+        `        proxy_set_header X-Real-IP $remote_addr;`,
+        `        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`,
+        `        proxy_set_header X-Forwarded-Proto $scheme;`,
+        `        proxy_connect_timeout 300;`,
+        `        proxy_http_version 1.1;`,
+        `        proxy_set_header Connection "";`,
+        `        chunked_transfer_encoding off;`,
+        `    }`,
+        `}`,
+        ``,
+    ].join('\n');
+
     try {
-        const out = await execInContainer(NGINX_CONTAINER, cmd);
-        if (out.includes('failed') || out.includes('error')) {
-            return res.status(500).json({ message: `Nginx config error: ${out}` });
+        // Write config via Docker putArchive — no shell escaping needed
+        const confFilename = 'minio-domain.conf';
+        await writeFileToContainer(NGINX_CONTAINER, '/etc/nginx/conf.d', confFilename, nginxConf);
+
+        // Test config then reload
+        const testOut = await execInContainer(NGINX_CONTAINER, 'nginx -t 2>&1');
+        if (testOut.toLowerCase().includes('failed') || testOut.toLowerCase().includes('emerg')) {
+            return res.status(500).json({ message: `Nginx config test failed: ${testOut}` });
         }
+        await execInContainer(NGINX_CONTAINER, 'nginx -s reload');
+
         await executeQuery('UPDATE storage_domains SET nginx_enabled=TRUE, updated_at=NOW() WHERE id=1');
-        res.json({ ok: true, domain });
+        res.json({ ok: true, domain, upstream: `${upstream}:${upstreamPort}`, nginxTest: testOut });
     } catch (err: any) {
         res.status(500).json({ message: `Nginx setup failed: ${err.message}` });
+    }
+});
+
+// GET /storage/domain/nginx/debug — inspect what's written inside docklet-nginx
+router.get('/domain/nginx/debug', async (_req, res) => {
+    if (!dockerOk()) return res.status(503).json({ message: 'Docker not available' });
+    try {
+        await getDocker().getContainer(NGINX_CONTAINER).inspect();
+    } catch {
+        return res.status(503).json({ message: `Container '${NGINX_CONTAINER}' not found` });
+    }
+    try {
+        const confContent = await execInContainer(NGINX_CONTAINER, `cat /etc/nginx/conf.d/minio-domain.conf 2>&1 || echo "__NOT_FOUND__"`);
+        const listConfd = await execInContainer(NGINX_CONTAINER, 'ls -la /etc/nginx/conf.d/ 2>&1');
+        const nginxTest = await execInContainer(NGINX_CONTAINER, 'nginx -t 2>&1');
+        res.json({ confContent, listConfd, nginxTest });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
     }
 });
 
