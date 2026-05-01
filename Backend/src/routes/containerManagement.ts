@@ -14,6 +14,21 @@ import { getJwtSecret } from '../lib/secret';
 const router = express.Router();
 router.use(authenticateToken);
 
+// ── Server-IP detection ───────────────────────────────────────────────────────
+let _cachedIp: string | null = null;
+async function getServerIp(): Promise<string> {
+    if (process.env.SERVER_IP) return process.env.SERVER_IP;
+    if (_cachedIp) return _cachedIp;
+    try {
+        const r = await fetch('https://api.ipify.org?format=json');
+        _cachedIp = ((await r.json()) as any).ip;
+        return _cachedIp!;
+    } catch {
+        return '127.0.0.1';
+    }
+}
+getServerIp().catch(() => {});
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const ALGO = 'aes-256-cbc';
@@ -698,6 +713,7 @@ router.post('/containers/:name/domain/nginx', async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ message: 'No domain assigned to this container' });
     const dom = rows[0];
+    const serverIp = await getServerIp();
 
     const confPath = path.join(NGINX_CONF_DIR, `container-${name}.conf`);
     const conf = `server {
@@ -705,7 +721,7 @@ router.post('/containers/:name/domain/nginx', async (req, res) => {
     server_name ${dom.full_domain};
 
     location / {
-        proxy_pass http://localhost:${dom.port};
+        proxy_pass http://${serverIp}:${dom.port};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
