@@ -15,7 +15,7 @@ import {
   containerBackupS3Files, containerRestore,
   type ContainerBackup, type ContainerBackupLog, type S3BackupFile,
 } from "@/api/client";
-import { useGetStorageInstance } from "@/api/client";
+import { useIsStorageConfigured } from "@/api/client";
 
 const CRON_PRESETS = [
   { label: "Manual only",    value: "" },
@@ -31,8 +31,8 @@ interface Props { containerName: string; open: boolean; onClose: () => void }
 
 export default function BackupDialog({ containerName, open, onClose }: Props) {
   const qc = useQueryClient();
-  const { data: storageData } = useGetStorageInstance();
-  const storageReady = storageData?.instance?.status === "running";
+  const { data: storageConfigData } = useIsStorageConfigured();
+  const storageReady = storageConfigData?.configured === true;
 
   const { data, isLoading } = useGetContainerBackups(open ? containerName : "");
   const backups = data?.backups || [];

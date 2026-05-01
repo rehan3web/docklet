@@ -733,6 +733,14 @@ export function useGetStorageInstance() {
   });
 }
 
+export function useIsStorageConfigured() {
+  return useQuery({
+    queryKey: ["storage-configured"],
+    queryFn: () => apiFetch<{ configured: boolean }>("/storage/configured"),
+    staleTime: 30000,
+  });
+}
+
 export async function storageCreateInstance(access_key: string, secret_key: string): Promise<{ ok: boolean; endpoint: string }> {
   return apiFetch("/storage/instance", { method: "POST", body: JSON.stringify({ access_key, secret_key }) });
 }

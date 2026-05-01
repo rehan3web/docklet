@@ -569,6 +569,16 @@ async function joinBackendNetworks(containerName: string): Promise<string> {
     return sharedEndpoint;
 }
 
+// GET /storage/configured — lightweight check: does a saved S3 config exist?
+router.get('/configured', async (_req, res) => {
+    try {
+        const { rows } = await executeQuery('SELECT id FROM storage_config WHERE id = 1');
+        res.json({ configured: rows.length > 0 });
+    } catch {
+        res.json({ configured: false });
+    }
+});
+
 // GET /storage/instance — status of the managed MinIO container
 router.get('/instance', async (_req, res) => {
     if (!dockerOk()) return res.json({ exists: false, running: false, dockerAvailable: false });
