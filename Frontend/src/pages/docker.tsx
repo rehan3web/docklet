@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2, MoreHorizontal, FileText, Network, HardDrive, Terminal, X, KeyRound, Clock, Globe } from "lucide-react";
+import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2, MoreHorizontal, FileText, Network, HardDrive, Terminal, X, KeyRound, Clock, Globe, Cpu, MemoryStick } from "lucide-react";
 import EnvVarsDialog from "@/components/container/EnvVarsDialog";
 import SchedulerDialog from "@/components/container/SchedulerDialog";
 import DomainDialog from "@/components/container/DomainDialog";
@@ -20,8 +20,8 @@ import { useTheme } from "@/hooks/use-theme";
 import {
   useGetDockerStatus, useGetDockerContainers,
   dockerStart, dockerStop, dockerRestart, dockerRemove, dockerBulk,
-  dockerLogs, dockerInspect,
-  type DockerContainer,
+  dockerLogs, dockerInspect, getContainerStats,
+  type DockerContainer, type ContainerStats,
 } from "@/api/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { getSocket } from "@/api/socket";
@@ -45,6 +45,62 @@ function stripAnsi(str: string): string {
     .replace(/[\x80-\x9F]/g, "")
     // Carriage returns
     .replace(/\r/g, "");
+}
+
+// ── Container stats helpers ────────────────────────────────────────────────────
+function fmtBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}K`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(0)}M`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)}G`;
+}
+
+function fmtUptime(ms: number) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+function ContainerStatsCell({ id, running }: { id: string; running: boolean }) {
+  const [stats, setStats] = useState<ContainerStats | null>(null);
+
+  useEffect(() => {
+    if (!running) { setStats(null); return; }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const s = await getContainerStats(id);
+        if (!cancelled) setStats(s);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const iv = setInterval(poll, 6000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [id, running]);
+
+  if (!running || !stats) return <span className="text-muted-foreground text-xs">—</span>;
+
+  const cpuColor = stats.cpuPercent > 80 ? "text-red-400" : stats.cpuPercent > 40 ? "text-amber-400" : "text-emerald-400";
+  const memColor = stats.memPercent > 85 ? "text-red-400" : stats.memPercent > 60 ? "text-amber-400" : "text-foreground";
+
+  return (
+    <div className="flex flex-col gap-0.5 text-[10px] font-mono min-w-[80px]">
+      <div className="flex items-center gap-1">
+        <Cpu className="w-2.5 h-2.5 text-muted-foreground shrink-0" />
+        <span className={cpuColor}>{stats.cpuPercent.toFixed(1)}%</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <MemoryStick className="w-2.5 h-2.5 text-muted-foreground shrink-0" />
+        <span className={memColor}>{fmtBytes(stats.memUsage)}</span>
+        <span className="text-muted-foreground">/ {fmtBytes(stats.memLimit)}</span>
+      </div>
+      {stats.uptimeMs > 0 && (
+        <div className="text-muted-foreground">up {fmtUptime(stats.uptimeMs)}</div>
+      )}
+    </div>
+  );
 }
 
 // ── Logs Dialog ───────────────────────────────────────────────────────────────
@@ -523,6 +579,7 @@ export default function DockerPage() {
                   <TableHead className="text-xs font-medium text-muted-foreground px-6">NAME</TableHead>
                   <TableHead className="text-xs font-medium text-muted-foreground px-6">IMAGE</TableHead>
                   <TableHead className="text-xs font-medium text-muted-foreground px-6">STATE</TableHead>
+                  <TableHead className="text-xs font-medium text-muted-foreground px-6">METRICS</TableHead>
                   <TableHead className="text-xs font-medium text-muted-foreground px-6">CREATED</TableHead>
                   <TableHead className="text-xs font-medium text-muted-foreground px-6 text-right">ACTIONS</TableHead>
                 </TableRow>
@@ -530,10 +587,10 @@ export default function DockerPage() {
               <TableBody>
                 {isLoading ? (
                   Array.from({ length: 4 }).map((_, i) => (
-                    <TableRow key={i}><TableCell colSpan={5} className="px-6"><Skeleton className="h-4 w-full bg-muted" /></TableCell></TableRow>
+                    <TableRow key={i}><TableCell colSpan={6} className="px-6"><Skeleton className="h-4 w-full bg-muted" /></TableCell></TableRow>
                   ))
                 ) : containers.length === 0 ? (
-                  <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-8">{dockerOk ? "No containers" : "Docker is not available."}</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">{dockerOk ? "No containers" : "Docker is not available."}</TableCell></TableRow>
                 ) : (
                   containers.map((c) => (
                     <TableRow key={c.id} className="border-border hover:bg-muted/30 transition-colors">
@@ -543,6 +600,9 @@ export default function DockerPage() {
                         <Badge variant="outline" className={`font-mono text-[10px] uppercase rounded-full px-2 py-0 ${c.state === 'running' ? 'text-primary bg-primary/10 border-primary/20' : 'text-muted-foreground bg-muted/50'}`}>
                           {c.state}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="px-6">
+                        <ContainerStatsCell id={c.id} running={c.state === 'running'} />
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground px-6 whitespace-nowrap">{format(new Date(c.createdAt), "MMM dd, HH:mm")}</TableCell>
                       <TableCell className="px-6 text-right">

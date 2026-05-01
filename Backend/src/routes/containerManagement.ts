@@ -67,6 +67,14 @@ export async function initContainerManagement() {
             UNIQUE(container_name, key)
         )`);
     await executeQuery(`
+        CREATE TABLE IF NOT EXISTS container_env_versions (
+            id SERIAL PRIMARY KEY,
+            container_name TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            snapshot JSONB NOT NULL,
+            applied_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())*1000
+        )`);
+    await executeQuery(`
         CREATE TABLE IF NOT EXISTS container_schedules (
             id SERIAL PRIMARY KEY,
             container_name TEXT NOT NULL,
@@ -74,9 +82,16 @@ export async function initContainerManagement() {
             cron_expr TEXT NOT NULL,
             command TEXT NOT NULL,
             enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            is_running BOOLEAN NOT NULL DEFAULT FALSE,
+            timeout_secs INTEGER NOT NULL DEFAULT 0,
+            max_retries INTEGER NOT NULL DEFAULT 0,
             last_run BIGINT,
             created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())*1000
         )`);
+    // Add new columns to existing schedule table if they don't exist
+    await executeQuery(`ALTER TABLE container_schedules ADD COLUMN IF NOT EXISTS is_running BOOLEAN NOT NULL DEFAULT FALSE`);
+    await executeQuery(`ALTER TABLE container_schedules ADD COLUMN IF NOT EXISTS timeout_secs INTEGER NOT NULL DEFAULT 0`);
+    await executeQuery(`ALTER TABLE container_schedules ADD COLUMN IF NOT EXISTS max_retries INTEGER NOT NULL DEFAULT 0`);
     await executeQuery(`
         CREATE TABLE IF NOT EXISTS container_schedule_logs (
             id SERIAL PRIMARY KEY,
@@ -84,8 +99,10 @@ export async function initContainerManagement() {
             started_at BIGINT NOT NULL,
             finished_at BIGINT,
             status TEXT NOT NULL DEFAULT 'running',
-            output TEXT NOT NULL DEFAULT ''
+            output TEXT NOT NULL DEFAULT '',
+            retry_count INTEGER NOT NULL DEFAULT 0
         )`);
+    await executeQuery(`ALTER TABLE container_schedule_logs ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0`);
     await executeQuery(`
         CREATE TABLE IF NOT EXISTS base_domain_config (
             id INTEGER PRIMARY KEY DEFAULT 1,
@@ -102,8 +119,13 @@ export async function initContainerManagement() {
             full_domain TEXT NOT NULL,
             port INTEGER NOT NULL,
             nginx_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            traefik_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            routing_mode TEXT NOT NULL DEFAULT 'nginx',
             created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())*1000
         )`);
+    // Add new columns to existing domains table
+    await executeQuery(`ALTER TABLE container_domains ADD COLUMN IF NOT EXISTS traefik_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
+    await executeQuery(`ALTER TABLE container_domains ADD COLUMN IF NOT EXISTS routing_mode TEXT NOT NULL DEFAULT 'nginx'`);
     await executeQuery(`
         CREATE TABLE IF NOT EXISTS container_backups (
             id SERIAL PRIMARY KEY,
@@ -153,32 +175,67 @@ function mountContainerCronJob(sched: any) {
     containerCronJobs.set(sched.id, job);
 }
 
+async function execWithTimeout(containerName: string, cmd: string, timeoutSecs: number): Promise<string> {
+    if (timeoutSecs <= 0) return execInContainer(containerName, cmd);
+    return Promise.race([
+        execInContainer(containerName, cmd),
+        new Promise<string>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timed out after ${timeoutSecs}s`)), timeoutSecs * 1000)
+        ),
+    ]);
+}
+
 async function runContainerSchedule(scheduleId: number): Promise<number> {
     const { rows } = await executeQuery(
         'SELECT * FROM container_schedules WHERE id = $1', [scheduleId]
     );
     if (!rows.length) return -1;
     const sched = rows[0];
+
+    // ── Overlap prevention ─────────────────────────────────────────────────────
+    if (sched.is_running) {
+        console.log(`[Scheduler] Skipping schedule ${scheduleId} — already running`);
+        return -1;
+    }
+
+    await executeQuery('UPDATE container_schedules SET is_running=TRUE WHERE id=$1', [scheduleId]);
+
     const { rows: logRows } = await executeQuery(
-        `INSERT INTO container_schedule_logs (schedule_id, started_at) VALUES ($1, $2) RETURNING id`,
+        `INSERT INTO container_schedule_logs (schedule_id, started_at, status) VALUES ($1, $2, 'running') RETURNING id`,
         [scheduleId, Date.now()]
     );
     const logId = logRows[0].id;
+
     let output = '';
     let status = 'success';
-    try {
-        output = await execInContainer(sched.container_name, sched.command);
-    } catch (err: any) {
-        output = err.message || String(err);
-        status = 'error';
+    const maxRetries = sched.max_retries ?? 0;
+    let retryCount = 0;
+
+    // ── Retry loop ─────────────────────────────────────────────────────────────
+    while (retryCount <= maxRetries) {
+        try {
+            output = await execWithTimeout(sched.container_name, sched.command, sched.timeout_secs ?? 0);
+            status = 'success';
+            break;
+        } catch (err: any) {
+            output = err.message || String(err);
+            status = 'error';
+            if (retryCount < maxRetries) {
+                output += `\n[Retry ${retryCount + 1}/${maxRetries}]`;
+                retryCount++;
+                await new Promise(r => setTimeout(r, 2000 * retryCount)); // exponential back-off
+            } else break;
+        }
     }
+
+    const now = Date.now();
     await executeQuery(
-        `UPDATE container_schedules SET last_run = $1 WHERE id = $2`,
-        [Date.now(), scheduleId]
+        `UPDATE container_schedules SET last_run=$1, is_running=FALSE WHERE id=$2`,
+        [now, scheduleId]
     );
     await executeQuery(
-        `UPDATE container_schedule_logs SET finished_at=$1, status=$2, output=$3 WHERE id=$4`,
-        [Date.now(), status, output, logId]
+        `UPDATE container_schedule_logs SET finished_at=$1, status=$2, output=$3, retry_count=$4 WHERE id=$5`,
+        [now, status, output, retryCount, logId]
     );
     return logId;
 }
@@ -356,6 +413,49 @@ router.delete('/containers/:name/env/:id', async (req, res) => {
     res.json({ ok: true });
 });
 
+// ── Env version history ────────────────────────────────────────────────────────
+router.get('/containers/:name/env/versions', async (req, res) => {
+    const { rows } = await executeQuery(
+        `SELECT id, version, applied_at FROM container_env_versions WHERE container_name=$1 ORDER BY version DESC LIMIT 20`,
+        [req.params.name]
+    );
+    res.json({ versions: rows });
+});
+
+router.get('/containers/:name/env/versions/:version', async (req, res) => {
+    const { rows } = await executeQuery(
+        `SELECT * FROM container_env_versions WHERE container_name=$1 AND version=$2`,
+        [req.params.name, req.params.version]
+    );
+    if (!rows.length) return res.status(404).json({ message: 'Version not found' });
+    // Return keys only (not encrypted values) for display
+    const snapshot = rows[0].snapshot as Record<string, string>;
+    res.json({ version: rows[0].version, applied_at: rows[0].applied_at, keys: Object.keys(snapshot) });
+});
+
+router.post('/containers/:name/env/rollback/:version', async (req, res) => {
+    const { name, version } = req.params;
+    try {
+        const { rows } = await executeQuery(
+            `SELECT * FROM container_env_versions WHERE container_name=$1 AND version=$2`, [name, version]
+        );
+        if (!rows.length) return res.status(404).json({ message: 'Version not found' });
+        const snapshot = rows[0].snapshot as Record<string, string>;
+        // Clear current env vars
+        await executeQuery('DELETE FROM container_env_vars WHERE container_name=$1', [name]);
+        // Restore snapshot
+        for (const [key, encValue] of Object.entries(snapshot)) {
+            await executeQuery(
+                `INSERT INTO container_env_vars (container_name, key, encrypted_value) VALUES ($1, $2, $3)`,
+                [name, key, encValue]
+            );
+        }
+        res.json({ ok: true, message: `Rolled back to version ${version}` });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 // Apply env vars — reconstruct and restart container
 router.post('/containers/:name/env/apply', async (req, res) => {
     const { name } = req.params;
@@ -365,6 +465,18 @@ router.post('/containers/:name/env/apply', async (req, res) => {
         );
         const envMap: Record<string, string> = {};
         for (const r of envRows) envMap[r.key] = decrypt(r.encrypted_value);
+
+        // ── Snapshot current env vars as a new version ─────────────────────────
+        const { rows: verRows } = await executeQuery(
+            `SELECT COALESCE(MAX(version), 0) AS max_ver FROM container_env_versions WHERE container_name=$1`, [name]
+        );
+        const nextVersion = (verRows[0]?.max_ver ?? 0) + 1;
+        const snapshot: Record<string, string> = {};
+        for (const r of envRows) snapshot[r.key] = r.encrypted_value;
+        await executeQuery(
+            `INSERT INTO container_env_versions (container_name, version, snapshot) VALUES ($1, $2, $3)`,
+            [name, nextVersion, JSON.stringify(snapshot)]
+        );
 
         const docker = getDocker();
         const containers = await docker.listContainers({ all: true });
@@ -421,12 +533,13 @@ router.get('/containers/:name/schedules', async (req, res) => {
 
 router.post('/containers/:name/schedules', async (req, res) => {
     const { name } = req.params;
-    const { label, cron_expr, command, enabled = true } = req.body;
+    const { label, cron_expr, command, enabled = true, timeout_secs = 0, max_retries = 0 } = req.body;
     if (!label || !cron_expr || !command) return res.status(400).json({ message: 'label, cron_expr, command required' });
     if (!cron.validate(cron_expr)) return res.status(400).json({ message: 'Invalid cron expression' });
     const { rows } = await executeQuery(
-        `INSERT INTO container_schedules (container_name, label, cron_expr, command, enabled) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [name, label, cron_expr, command, enabled]
+        `INSERT INTO container_schedules (container_name, label, cron_expr, command, enabled, timeout_secs, max_retries)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [name, label, cron_expr, command, enabled, timeout_secs, max_retries]
     );
     const sched = rows[0];
     if (sched.enabled) mountContainerCronJob(sched);
@@ -435,16 +548,19 @@ router.post('/containers/:name/schedules', async (req, res) => {
 
 router.patch('/containers/:name/schedules/:id', async (req, res) => {
     const { name, id } = req.params;
-    const { label, cron_expr, command, enabled } = req.body;
+    const { label, cron_expr, command, enabled, timeout_secs, max_retries } = req.body;
     if (cron_expr && !cron.validate(cron_expr)) return res.status(400).json({ message: 'Invalid cron expression' });
     const { rows } = await executeQuery(
         `UPDATE container_schedules SET
             label = COALESCE($1, label),
             cron_expr = COALESCE($2, cron_expr),
             command = COALESCE($3, command),
-            enabled = COALESCE($4, enabled)
-         WHERE id = $5 AND container_name = $6 RETURNING *`,
-        [label ?? null, cron_expr ?? null, command ?? null, enabled ?? null, id, name]
+            enabled = COALESCE($4, enabled),
+            timeout_secs = COALESCE($5, timeout_secs),
+            max_retries = COALESCE($6, max_retries)
+         WHERE id = $7 AND container_name = $8 RETURNING *`,
+        [label ?? null, cron_expr ?? null, command ?? null, enabled ?? null,
+         timeout_secs ?? null, max_retries ?? null, id, name]
     );
     if (!rows.length) return res.status(404).json({ message: 'Schedule not found' });
     const sched = rows[0];
@@ -597,6 +713,100 @@ router.post('/containers/:name/domain/nginx', async (req, res) => {
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }
+});
+
+// ── Traefik integration ────────────────────────────────────────────────────────
+router.post('/containers/:name/domain/traefik', async (req, res) => {
+    const { name } = req.params;
+    try {
+        const { rows } = await executeQuery('SELECT * FROM container_domains WHERE container_name=$1', [name]);
+        if (!rows.length) return res.status(404).json({ message: 'No domain assigned to this container' });
+        const dom = rows[0];
+
+        const docker = getDocker();
+        const containers = await docker.listContainers({ all: true });
+        const found = containers.find(c => c.Names.some(n => n.replace(/^\//, '') === name));
+        if (!found) return res.status(404).json({ message: 'Container not found in Docker' });
+
+        const containerObj = docker.getContainer(found.Id);
+        const info = await containerObj.inspect();
+
+        // Build Traefik labels
+        const safeName = name.replace(/[^a-zA-Z0-9]/g, '-');
+        const traefikLabels: Record<string, string> = {
+            'traefik.enable': 'true',
+            [`traefik.http.routers.${safeName}.rule`]: `Host(\`${dom.full_domain}\`)`,
+            [`traefik.http.routers.${safeName}.entrypoints`]: 'web,websecure',
+            [`traefik.http.routers.${safeName}.tls.certresolver`]: 'letsencrypt',
+            [`traefik.http.services.${safeName}.loadbalancer.server.port`]: String(dom.port),
+        };
+        const mergedLabels = { ...(info.Config.Labels ?? {}), ...traefikLabels };
+
+        // Remove 'traefik.enable=false' if present from older assignment
+        delete mergedLabels['traefik.disable'];
+
+        // Stop + remove + recreate with new labels
+        try { await containerObj.stop(); } catch { /* already stopped */ }
+        await containerObj.remove();
+        const newContainer = await docker.createContainer({
+            name,
+            Image: info.Config.Image,
+            Cmd: info.Config.Cmd || undefined,
+            Entrypoint: info.Config.Entrypoint || undefined,
+            Env: info.Config.Env || [],
+            ExposedPorts: info.Config.ExposedPorts || {},
+            HostConfig: info.HostConfig,
+            Labels: mergedLabels,
+        });
+        await newContainer.start();
+
+        // Remove old nginx config if any
+        const confPath = path.join(NGINX_CONF_DIR, `container-${name}.conf`);
+        try { await fs.promises.unlink(confPath); } catch { /* not present */ }
+
+        await executeQuery(
+            `UPDATE container_domains SET nginx_enabled=FALSE, traefik_enabled=TRUE, routing_mode='traefik' WHERE container_name=$1`, [name]
+        );
+        res.json({ ok: true, fullDomain: dom.full_domain, labels: traefikLabels });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ── Traefik compose snippet ────────────────────────────────────────────────────
+router.get('/traefik/compose-snippet', async (req, res) => {
+    const { rows } = await executeQuery('SELECT * FROM base_domain_config WHERE id=1');
+    const email = (req.query.email as string) || 'admin@example.com';
+    const domain = rows[0]?.domain || 'yourdomain.com';
+    const snippet = `  traefik:
+    image: traefik:v3.0
+    container_name: docklet-traefik
+    restart: unless-stopped
+    command:
+      - "--api.insecure=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${email}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true`;
+    res.json({ snippet, domain, email });
 });
 
 router.delete('/containers/:name/domain', async (req, res) => {

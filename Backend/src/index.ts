@@ -4,6 +4,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/auth';
 import dbRoutes from './routes/db';
 import queryRoutes from './routes/query';
@@ -37,11 +38,28 @@ setIo(io);
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
+// ── Rate limiting ──────────────────────────────────────────────────────────────
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 30,                   // 30 attempts per window
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'Too many login attempts. Please try again later.' },
+});
+
+const statsLimiter = rateLimit({
+    windowMs: 10 * 1000,       // 10 seconds
+    max: 60,                   // 60 stat requests per 10s (one per container per tick)
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
 });
 
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/docker/containers', statsLimiter);
 app.use('/api/db', dbRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/admin', adminRoutes);

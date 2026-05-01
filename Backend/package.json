@@ -23,6 +23,7 @@
     "dockerode": "^5.0.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.4.1",
     "js-yaml": "^4.1.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",

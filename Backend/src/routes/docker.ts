@@ -159,6 +159,42 @@ router.get('/containers/:id/logs', authenticateToken, async (req, res) => {
     }
 });
 
+// ── Container stats (CPU %, RAM, Uptime) ─────────────────────────────────────
+router.get('/containers/:id/stats', authenticateToken, async (req, res) => {
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+    try {
+        const container = getDocker().getContainer(String(req.params.id));
+        const [statsRaw, info] = await Promise.all([
+            container.stats({ stream: false }) as Promise<any>,
+            container.inspect(),
+        ]);
+        // CPU %
+        const cpuDelta = (statsRaw.cpu_stats?.cpu_usage?.total_usage ?? 0) -
+                         (statsRaw.precpu_stats?.cpu_usage?.total_usage ?? 0);
+        const sysDelta = (statsRaw.cpu_stats?.system_cpu_usage ?? 0) -
+                         (statsRaw.precpu_stats?.system_cpu_usage ?? 0);
+        const numCpus = statsRaw.cpu_stats?.online_cpus ?? statsRaw.cpu_stats?.cpu_usage?.percpu_usage?.length ?? 1;
+        const cpuPercent = sysDelta > 0 ? (cpuDelta / sysDelta) * numCpus * 100 : 0;
+        // Memory
+        const cache = statsRaw.memory_stats?.stats?.cache ?? 0;
+        const memUsage = Math.max(0, (statsRaw.memory_stats?.usage ?? 0) - cache);
+        const memLimit = statsRaw.memory_stats?.limit ?? 0;
+        // Uptime
+        const startedAt = info.State?.StartedAt ? new Date(info.State.StartedAt) : null;
+        const uptimeMs = startedAt && info.State?.Running ? Date.now() - startedAt.getTime() : 0;
+        // Network I/O
+        let netRx = 0, netTx = 0;
+        for (const iface of Object.values(statsRaw.networks ?? {})) {
+            netRx += (iface as any).rx_bytes ?? 0;
+            netTx += (iface as any).tx_bytes ?? 0;
+        }
+        res.json({ cpuPercent: Math.min(cpuPercent, 100), memUsage, memLimit, memPercent: memLimit > 0 ? (memUsage / memLimit) * 100 : 0, uptimeMs, netRx, netTx });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 // ── Container inspect (network + mounts) ─────────────────────────────────────
 router.get('/containers/:id/inspect', authenticateToken, async (req, res) => {
     const avail = dockerAvailable();

@@ -924,3 +924,33 @@ export const containerBackupS3Files = (name: string, id: number) =>
   mgmt(`/containers/${encodeURIComponent(name)}/backups/${id}/s3-files`) as Promise<{ files: S3BackupFile[] }>;
 export const containerRestore = (name: string, s3_bucket: string, s3_key: string) =>
   mgmt(`/containers/${encodeURIComponent(name)}/restore`, { method: "POST", ...j({ s3_bucket, s3_key }) });
+
+// ── Container Stats ────────────────────────────────────────────────────────────
+export type ContainerStats = {
+  cpuPercent: number; memUsage: number; memLimit: number; memPercent: number;
+  uptimeMs: number; netRx: number; netTx: number;
+};
+export const getContainerStats = (id: string) =>
+  apiFetch(`/docker/containers/${encodeURIComponent(id)}/stats`) as Promise<ContainerStats>;
+
+// ── Env Versioning ─────────────────────────────────────────────────────────────
+export type EnvVersion = { id: number; version: number; applied_at: number };
+export const containerEnvVersions = (name: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/env/versions`) as Promise<{ versions: EnvVersion[] }>;
+export const containerEnvRollback = (name: string, version: number) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/env/rollback/${version}`, { method: "POST" });
+
+// ── Traefik ────────────────────────────────────────────────────────────────────
+export const containerDomainTraefik = (name: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/domain/traefik`, { method: "POST" });
+export const traefikComposeSnippet = (email?: string) =>
+  mgmt(`/traefik/compose-snippet${email ? `?email=${encodeURIComponent(email)}` : ''}`) as Promise<{ snippet: string; domain: string; email: string }>;
+
+// ── Extended ContainerDomain type ──────────────────────────────────────────────
+export type ContainerDomainV2 = ContainerDomain & { traefik_enabled: boolean; routing_mode: string };
+
+// ── Extended ContainerSchedule type ───────────────────────────────────────────
+export type ContainerScheduleV2 = ContainerSchedule & {
+  is_running: boolean; timeout_secs: number; max_retries: number;
+};
+export type ContainerScheduleLogV2 = ContainerScheduleLog & { retry_count: number };

@@ -4,12 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Globe, CheckCircle, XCircle, Copy, Loader2, RefreshCw, Trash2, Zap } from "lucide-react";
+import { Globe, CheckCircle, XCircle, Copy, Loader2, RefreshCw, Trash2, Zap, Code2, ChevronDown, ChevronUp } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetBaseDomain, baseDomainSave, baseDomainVerify,
   containerDomainGet, containerDomainAssign, containerDomainNginx,
   containerDomainDelete, containerDomainRegenerate,
+  containerDomainTraefik, traefikComposeSnippet,
   type ContainerDomain, type BaseDomainConfig,
 } from "@/api/client";
 
@@ -32,7 +33,11 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
   const [customSub, setCustomSub] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [enablingNginx, setEnablingNginx] = useState(false);
+  const [enablingTraefik, setEnablingTraefik] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [traefikSnippet, setTraefikSnippet] = useState<string | null>(null);
+  const [showSnippet, setShowSnippet] = useState(false);
+  const [snippetEmail, setSnippetEmail] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -96,6 +101,25 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
       refresh();
     } catch (err: any) { toast.error(err.message); }
     finally { setEnablingNginx(false); }
+  }
+
+  async function handleEnableTraefik() {
+    if (!confirm("This will stop, remove and recreate the container with Traefik labels. Continue?")) return;
+    setEnablingTraefik(true);
+    try {
+      await containerDomainTraefik(containerName);
+      toast.success("Traefik labels applied — container restarted");
+      refresh();
+    } catch (err: any) { toast.error(err.message); }
+    finally { setEnablingTraefik(false); }
+  }
+
+  async function loadTraefikSnippet() {
+    try {
+      const r = await traefikComposeSnippet(snippetEmail || undefined);
+      setTraefikSnippet(r.snippet);
+      setShowSnippet(true);
+    } catch (err: any) { toast.error(err.message); }
   }
 
   async function handleRegenerate() {
@@ -222,27 +246,84 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
             </div>
           </div>
 
-          {/* ── Step 3: Enable nginx ── */}
+          {/* ── Step 3: Choose routing engine ── */}
           {domain && (
             <div className="rounded-xl border border-border overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-3 bg-muted/30 border-b border-border">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Step 3 — Activate Nginx</span>
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Step 3 — Activate Routing</span>
+                {(domain as any).routing_mode && (domain as any).routing_mode !== 'none' && (
+                  <Badge className={`text-[10px] py-0 px-1.5 rounded-full ${
+                    (domain as any).routing_mode === 'traefik'
+                      ? "bg-purple-500/15 text-purple-400 border-purple-500/30"
+                      : "bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
+                  }`}>
+                    {(domain as any).routing_mode}
+                  </Badge>
+                )}
               </div>
-              <div className="p-4">
-                {domain.nginx_enabled ? (
-                  <div className="flex items-center gap-2 text-xs text-emerald-500">
+              <div className="p-4 space-y-3">
+                {/* Active state */}
+                {(domain as any).traefik_enabled && (
+                  <div className="flex items-center gap-2 text-xs text-purple-400 mb-1">
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Traefik is routing <span className="font-mono">{domain.full_domain}</span> → port {domain.port}</span>
+                  </div>
+                )}
+                {domain.nginx_enabled && !(domain as any).traefik_enabled && (
+                  <div className="flex items-center gap-2 text-xs text-emerald-500 mb-1">
                     <CheckCircle className="w-4 h-4" />
                     <span>Nginx is routing <span className="font-mono">{domain.full_domain}</span> → port {domain.port}</span>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">Write the nginx config and reload to activate this domain.</p>
-                    <Button size="sm" className="h-8 text-xs w-full bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] border border-black/10 dark:border-white/10 shadow-none"
+                )}
+
+                {/* Two-column choice */}
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Nginx */}
+                  <div className="rounded-lg border border-border p-3 space-y-2">
+                    <div className="text-xs font-medium flex items-center gap-1.5"><Zap className="w-3.5 h-3.5 text-muted-foreground" />Nginx</div>
+                    <p className="text-[11px] text-muted-foreground">Write config file to shared volume and reload nginx.</p>
+                    <Button size="sm" variant="outline" className="h-7 text-xs w-full"
                       onClick={handleEnableNginx} disabled={enablingNginx}>
-                      {enablingNginx ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />Applying…</> : <><Zap className="w-3.5 h-3.5 mr-1" />Activate Nginx</>}
+                      {enablingNginx ? <Loader2 className="w-3 h-3 animate-spin" /> : domain.nginx_enabled ? "Re-apply" : "Activate"}
                     </Button>
                   </div>
-                )}
+
+                  {/* Traefik */}
+                  <div className="rounded-lg border border-border p-3 space-y-2">
+                    <div className="text-xs font-medium flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                      Traefik
+                      <Badge className="text-[9px] py-0 px-1 rounded-full bg-purple-500/15 text-purple-400 border-purple-500/30 ml-auto">Labels</Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Recreate container with Traefik Docker labels. Requires Traefik running.</p>
+                    <Button size="sm" variant="outline" className="h-7 text-xs w-full"
+                      onClick={handleEnableTraefik} disabled={enablingTraefik}>
+                      {enablingTraefik ? <Loader2 className="w-3 h-3 animate-spin" /> : (domain as any).traefik_enabled ? "Re-apply" : "Activate"}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Traefik compose snippet */}
+                <div className="rounded-lg border border-border/50 bg-muted/10 overflow-hidden">
+                  <button
+                    className="flex items-center gap-2 w-full px-3 py-2 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => showSnippet ? setShowSnippet(false) : loadTraefikSnippet()}
+                  >
+                    <Code2 className="w-3.5 h-3.5" />
+                    <span>Traefik setup — compose snippet</span>
+                    {showSnippet ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+                  </button>
+                  {showSnippet && traefikSnippet && (
+                    <div className="px-3 pb-3 space-y-2">
+                      <div className="flex gap-2 items-center">
+                        <Input placeholder="ACME email" value={snippetEmail} onChange={e => setSnippetEmail(e.target.value)} className="h-7 text-xs flex-1" />
+                        <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={loadTraefikSnippet}>Refresh</Button>
+                      </div>
+                      <pre className="bg-muted rounded-lg p-2.5 text-[10px] font-mono text-foreground overflow-x-auto whitespace-pre leading-relaxed">{traefikSnippet}</pre>
+                      <p className="text-[10px] text-muted-foreground">Add this to your <code className="font-mono">postgres.yml</code> and run: <code className="font-mono">docker network create proxy</code></p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

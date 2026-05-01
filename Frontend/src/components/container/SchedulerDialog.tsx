@@ -38,6 +38,8 @@ export default function SchedulerDialog({ containerName, open, onClose }: Props)
   const [cronPreset, setCronPreset] = useState("* * * * *");
   const [customCron, setCustomCron] = useState("");
   const [command, setCommand] = useState("");
+  const [timeoutSecs, setTimeoutSecs] = useState(0);
+  const [maxRetries, setMaxRetries] = useState(0);
   const [saving, setSaving] = useState(false);
   const [runningId, setRunningId] = useState<number | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<number | null>(null);
@@ -53,9 +55,14 @@ export default function SchedulerDialog({ containerName, open, onClose }: Props)
     if (!label.trim() || !command.trim() || !finalCron) return;
     setSaving(true);
     try {
-      await containerScheduleCreate(containerName, { label, cron_expr: finalCron, command, enabled: true });
+      await containerScheduleCreate(containerName, {
+        label, cron_expr: finalCron, command, enabled: true,
+        ...(timeoutSecs > 0 ? { timeout_secs: timeoutSecs } : {}),
+        ...(maxRetries > 0 ? { max_retries: maxRetries } : {}),
+      } as any);
       toast.success("Schedule created");
-      setLabel(""); setCronPreset("* * * * *"); setCustomCron(""); setCommand(""); setShowAdd(false);
+      setLabel(""); setCronPreset("* * * * *"); setCustomCron(""); setCommand("");
+      setTimeoutSecs(0); setMaxRetries(0); setShowAdd(false);
       refresh();
     } catch (err: any) { toast.error(err.message); }
     finally { setSaving(false); }
@@ -129,6 +136,29 @@ export default function SchedulerDialog({ containerName, open, onClose }: Props)
                 )}
               </div>
               <Input placeholder="Command to run (e.g. /app/cleanup.sh)" value={command} onChange={e => setCommand(e.target.value)} className="h-8 text-xs font-mono" />
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[10px] text-muted-foreground mb-1 block">Timeout (0 = none)</label>
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="number" min={0} placeholder="0"
+                      value={timeoutSecs || ""}
+                      onChange={e => setTimeoutSecs(parseInt(e.target.value) || 0)}
+                      className="h-8 text-xs w-full"
+                    />
+                    <span className="text-[10px] text-muted-foreground shrink-0">sec</span>
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] text-muted-foreground mb-1 block">Max retries</label>
+                  <Input
+                    type="number" min={0} max={5} placeholder="0"
+                    value={maxRetries || ""}
+                    onChange={e => setMaxRetries(Math.min(5, parseInt(e.target.value) || 0))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAdd(false)}>Cancel</Button>
                 <Button size="sm" className="h-7 text-xs bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] border border-black/10 dark:border-white/10 shadow-none"
@@ -164,6 +194,17 @@ export default function SchedulerDialog({ containerName, open, onClose }: Props)
                       <span className="text-[10px] text-muted-foreground shrink-0">
                         Last: {format(new Date(Number(s.last_run)), "MMM d HH:mm")}
                       </span>
+                    )}
+                    {(s as any).is_running && (
+                      <Badge className="text-[10px] rounded-full px-2 py-0 bg-amber-500/15 text-amber-500 border-amber-500/30 animate-pulse">
+                        running
+                      </Badge>
+                    )}
+                    {(s as any).timeout_secs > 0 && (
+                      <span className="text-[10px] text-muted-foreground shrink-0">{(s as any).timeout_secs}s</span>
+                    )}
+                    {(s as any).max_retries > 0 && (
+                      <span className="text-[10px] text-muted-foreground shrink-0">↻{(s as any).max_retries}</span>
                     )}
                     <Badge variant="outline" className={`text-[10px] rounded-full px-2 py-0 ${s.enabled ? "text-primary border-primary/30 bg-primary/5" : "text-muted-foreground"}`}>
                       {s.enabled ? "on" : "off"}
