@@ -243,8 +243,25 @@ router.get('/buckets/:bucket/files/download', async (req, res) => {
     const cfg = await getConfig();
     if (!cfg) return res.status(503).json({ message: 'Not connected' });
     try {
+        // Build signing client with the public-facing endpoint so presigned URLs work externally
+        const { rows: domainRows } = await executeQuery('SELECT * FROM storage_domains WHERE id = 1');
+        const domainRow = domainRows[0];
+        let publicEndpoint: string;
+        if (domainRow?.nginx_enabled && domainRow?.domain) {
+            const scheme = domainRow.domain.startsWith('https') ? 'https' : 'http';
+            publicEndpoint = `${scheme}://${domainRow.domain}`;
+        } else {
+            const publicIP = await getPublicIP();
+            publicEndpoint = publicIP ? `http://${publicIP}:${cfg.port || 9000}` : `http://${cfg.endpoint}:${cfg.port}`;
+        }
+        const signingClient = new S3Client({
+            endpoint: publicEndpoint,
+            region: cfg.region || 'us-east-1',
+            credentials: { accessKeyId: cfg.access_key, secretAccessKey: cfg.secret_key },
+            forcePathStyle: true,
+        });
         const url = await getSignedUrl(
-            buildClient(cfg),
+            signingClient,
             new GetObjectCommand({ Bucket: String(req.params.bucket), Key: key }),
             { expiresIn: 3600 }
         );
