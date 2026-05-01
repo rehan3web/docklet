@@ -497,28 +497,39 @@ router.post('/containers/:name/env/apply', async (req, res) => {
         const merged = { ...existingEnv, ...envMap };
         const envArr = Object.entries(merged).map(([k, v]) => `${k}=${v}`);
 
-        // Stop (5s grace), force-remove, brief pause, recreate
-        try { await containerObj.stop({ t: 5 } as any); } catch { /* already stopped */ }
-        try { await containerObj.remove({ force: true } as any); } catch { /* best-effort */ }
-        await new Promise(r => setTimeout(r, 800));
+        // Respond BEFORE touching the container — the container being recreated
+        // may be serving the UI/proxy (e.g. docklet-client), so stopping it mid-
+        // request would drop the connection and surface ERR_EMPTY_RESPONSE.
+        res.json({ ok: true, message: 'Container restarting with new environment…' });
 
-        // Recreate with sanitised HostConfig (removes AutoRemove, read-only fields)
-        const newContainer = await docker.createContainer({
-            name,
-            Image: cfg.Image,
-            Cmd: cfg.Cmd?.length ? cfg.Cmd : undefined,
-            Entrypoint: cfg.Entrypoint?.length ? cfg.Entrypoint : undefined,
-            Env: envArr,
-            ExposedPorts: cfg.ExposedPorts || {},
-            WorkingDir: cfg.WorkingDir || undefined,
-            User: cfg.User || undefined,
-            HostConfig: sanitiseHostConfig(hostCfg),
-            Labels: cfg.Labels || {},
+        // ── Background recreation (response already sent) ──────────────────────
+        setImmediate(async () => {
+            try {
+                // Stop (5s grace), force-remove, brief pause, recreate
+                try { await containerObj.stop({ t: 5 } as any); } catch { /* already stopped */ }
+                try { await containerObj.remove({ force: true } as any); } catch { /* best-effort */ }
+                await new Promise(r => setTimeout(r, 800));
+
+                const newContainer = await docker.createContainer({
+                    name,
+                    Image: cfg.Image,
+                    Cmd: cfg.Cmd?.length ? cfg.Cmd : undefined,
+                    Entrypoint: cfg.Entrypoint?.length ? cfg.Entrypoint : undefined,
+                    Env: envArr,
+                    ExposedPorts: cfg.ExposedPorts || {},
+                    WorkingDir: cfg.WorkingDir || undefined,
+                    User: cfg.User || undefined,
+                    HostConfig: sanitiseHostConfig(hostCfg),
+                    Labels: cfg.Labels || {},
+                });
+                await newContainer.start();
+                console.log(`[EnvApply] Container "${name}" restarted with new env (version ${nextVersion}).`);
+            } catch (bgErr: any) {
+                console.error(`[EnvApply] Background recreation failed for "${name}":`, bgErr.message);
+            }
         });
-        await newContainer.start();
-        res.json({ ok: true, message: 'Container restarted with new environment' });
     } catch (err: any) {
-        res.status(500).json({ message: err.message });
+        if (!res.headersSent) res.status(500).json({ message: err.message });
     }
 });
 
@@ -766,55 +777,64 @@ router.post('/containers/:name/domain/traefik', async (req, res) => {
         };
         const mergedLabels = { ...(info.Config.Labels ?? {}), ...traefikLabels };
 
-        console.log(`[Traefik] Recreating container "${name}" with labels…`);
-
-        // Stop with a short timeout so we don't hang the request
-        try {
-            await containerObj.stop({ t: 5 } as any);
-        } catch (e: any) {
-            // "not running" is fine — continue
-            if (!e.message?.includes('not running') && e.statusCode !== 304) {
-                console.warn(`[Traefik] stop warning: ${e.message}`);
-            }
-        }
-
-        // Force-remove so we don't get "container still stopping" errors
-        try {
-            await containerObj.remove({ force: true } as any);
-        } catch (e: any) {
-            console.warn(`[Traefik] remove warning: ${e.message}`);
-        }
-
-        // Brief pause — Docker needs a moment to release the container name
-        await new Promise(r => setTimeout(r, 800));
-
-        const newContainer = await docker.createContainer({
-            name,
-            Image: info.Config.Image,
-            Cmd: info.Config.Cmd?.length ? info.Config.Cmd : undefined,
-            Entrypoint: info.Config.Entrypoint?.length ? info.Config.Entrypoint : undefined,
-            Env: info.Config.Env || [],
-            ExposedPorts: info.Config.ExposedPorts || {},
-            WorkingDir: info.Config.WorkingDir || undefined,
-            User: info.Config.User || undefined,
-            HostConfig: sanitiseHostConfig(info.HostConfig),
-            Labels: mergedLabels,
-        });
-        await newContainer.start();
-
-        console.log(`[Traefik] Container "${name}" recreated and started.`);
-
-        // Clean up old nginx config if any
-        const confPath = path.join(NGINX_CONF_DIR, `container-${name}.conf`);
-        try { await fs.promises.unlink(confPath); } catch { /* not present */ }
-
+        // Update DB and respond BEFORE touching the container.
+        // The container being recreated may be the one proxying this very request
+        // (e.g. docklet-client / nginx frontend), so we must send the response
+        // first or the connection gets dropped mid-flight.
         await executeQuery(
             `UPDATE container_domains SET nginx_enabled=FALSE, traefik_enabled=TRUE, routing_mode='traefik' WHERE container_name=$1`, [name]
         );
         res.json({ ok: true, fullDomain: dom.full_domain, labels: traefikLabels });
+
+        // ── Background recreation (response already sent) ──────────────────────
+        setImmediate(async () => {
+            try {
+                console.log(`[Traefik] Recreating container "${name}" with labels…`);
+
+                // Stop with a short timeout
+                try {
+                    await containerObj.stop({ t: 5 } as any);
+                } catch (e: any) {
+                    if (!e.message?.includes('not running') && e.statusCode !== 304) {
+                        console.warn(`[Traefik] stop warning: ${e.message}`);
+                    }
+                }
+
+                // Force-remove
+                try {
+                    await containerObj.remove({ force: true } as any);
+                } catch (e: any) {
+                    console.warn(`[Traefik] remove warning: ${e.message}`);
+                }
+
+                // Brief pause — Docker needs a moment to release the container name
+                await new Promise(r => setTimeout(r, 800));
+
+                const newContainer = await docker.createContainer({
+                    name,
+                    Image: info.Config.Image,
+                    Cmd: info.Config.Cmd?.length ? info.Config.Cmd : undefined,
+                    Entrypoint: info.Config.Entrypoint?.length ? info.Config.Entrypoint : undefined,
+                    Env: info.Config.Env || [],
+                    ExposedPorts: info.Config.ExposedPorts || {},
+                    WorkingDir: info.Config.WorkingDir || undefined,
+                    User: info.Config.User || undefined,
+                    HostConfig: sanitiseHostConfig(info.HostConfig),
+                    Labels: mergedLabels,
+                });
+                await newContainer.start();
+                console.log(`[Traefik] Container "${name}" recreated and started.`);
+
+                // Clean up old nginx config if any
+                const confPath = path.join(NGINX_CONF_DIR, `container-${name}.conf`);
+                try { await fs.promises.unlink(confPath); } catch { /* not present */ }
+            } catch (bgErr: any) {
+                console.error(`[Traefik] Background recreation failed for "${name}":`, bgErr.message);
+            }
+        });
     } catch (err: any) {
-        console.error(`[Traefik] Error recreating "${name}":`, err.message);
-        res.status(500).json({ message: err.message });
+        console.error(`[Traefik] Error for "${name}":`, err.message);
+        if (!res.headersSent) res.status(500).json({ message: err.message });
     }
 });
 
