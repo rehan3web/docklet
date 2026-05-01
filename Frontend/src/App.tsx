@@ -19,6 +19,7 @@ import DeployPage from "@/pages/deploy";
 import ProxyPage from "@/pages/proxy";
 import SchedulerPage from "@/pages/scheduler";
 import StoragePage from "@/pages/storage";
+import DomainsPage from "@/pages/domains";
 import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import { ThemeProvider } from "@/hooks/use-theme";
@@ -68,6 +69,7 @@ function Router() {
       <Route path="/proxy">{() => <PrivateRoute component={ProxyPage} />}</Route>
       <Route path="/scheduler">{() => <PrivateRoute component={SchedulerPage} />}</Route>
       <Route path="/storage">{() => <PrivateRoute component={StoragePage} />}</Route>
+      <Route path="/domains">{() => <PrivateRoute component={DomainsPage} />}</Route>
       <Route path="/login">{() => <PublicRoute component={LoginPage} />}</Route>
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route component={NotFound} />

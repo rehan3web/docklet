@@ -954,3 +954,32 @@ export type ContainerScheduleV2 = ContainerSchedule & {
   is_running: boolean; timeout_secs: number; max_retries: number;
 };
 export type ContainerScheduleLogV2 = ContainerScheduleLog & { retry_count: number };
+
+// ── Verified Domains ───────────────────────────────────────────────────────────
+export type VerifiedDomain = {
+  id: number;
+  domain: string;
+  vps_ip: string;
+  verified: boolean;
+  created_at: number;
+};
+
+export function useGetVerifiedDomains() {
+  return useQuery({
+    queryKey: ["verified-domains"],
+    queryFn: () => apiFetch<{ domains: VerifiedDomain[]; serverIp: string }>("/domains"),
+    staleTime: 30_000,
+  });
+}
+
+export const addVerifiedDomain = (domain: string, vps_ip: string) =>
+  apiFetch<{ domain: VerifiedDomain }>("/domains", { method: "POST", ...j({ domain, vps_ip }) });
+
+export const deleteVerifiedDomain = (id: number) =>
+  apiFetch<{ ok: boolean }>(`/domains/${id}`, { method: "DELETE" });
+
+export const verifyVerifiedDomain = (id: number) =>
+  apiFetch<{ verified: boolean; apexOk: boolean; wildcardOk: boolean; apexIps: string[]; wildcardIps: string[]; vps_ip: string }>(`/domains/${id}/verify`, { method: "POST" });
+
+export const getDomainsServerIp = () =>
+  apiFetch<{ ip: string }>("/domains/server-ip");

@@ -23,6 +23,7 @@ import {
   storageCreateInstance, storageInstanceHealth, storageDestroyInstance,
   storageAddDomain, storageVerifyDomain, storageSetupNginx, storageRemoveDomain,
   storageGetBucketPolicy, storageSetBucketPolicy, storageShareFile,
+  useGetVerifiedDomains,
   type StorageBucket, type StorageFile,
 } from "@/api/client";
 
@@ -302,10 +303,20 @@ function DomainPanel() {
   const domain = data?.domain;
   const serverIP = data?.serverIP || "";
 
+  const { data: vdData } = useGetVerifiedDomains();
+  const verifiedDomains = (vdData?.domains ?? []).filter(d => d.verified);
+
+  const [baseDomainId, setBaseDomainId] = useState<number | "">("");
+  const [storageSub, setStorageSub] = useState("storage");
   const [domainInput, setDomainInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ verified: boolean; resolved: string[]; reason?: string } | null>(null);
   const [copied, setCopied] = useState("");
+
+  const selectedVd = verifiedDomains.find(d => d.id === baseDomainId) ?? null;
+  const fullDomainPreview = selectedVd
+    ? (storageSub.trim() ? `${storageSub.trim()}.${selectedVd.domain}` : selectedVd.domain)
+    : domainInput;
 
   function copyText(text: string, key: string) {
     navigator.clipboard.writeText(text);
@@ -315,10 +326,11 @@ function DomainPanel() {
 
   async function handleAddDomain(e: React.FormEvent) {
     e.preventDefault();
-    if (!domainInput.trim()) return;
+    const finalDomain = fullDomainPreview.trim();
+    if (!finalDomain) return;
     setBusy(true);
     try {
-      await storageAddDomain(domainInput.trim());
+      await storageAddDomain(finalDomain);
       toast.success("Domain saved");
       setDomainInput("");
       qc.invalidateQueries({ queryKey: ["storage-domain"] });
@@ -396,11 +408,40 @@ function DomainPanel() {
           {domain && <button onClick={handleRemove} disabled={busy} className="text-xs text-muted-foreground hover:text-destructive ml-auto">Remove</button>}
         </div>
         {!domain ? (
-          <form onSubmit={handleAddDomain} className="flex gap-2 ml-7">
-            <Input placeholder="storage.yourdomain.com" value={domainInput} onChange={e => setDomainInput(e.target.value)} className="h-8 text-xs flex-1" required />
-            <Button type="submit" size="sm" disabled={busy} className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
-              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
-            </Button>
+          <form onSubmit={handleAddDomain} className="ml-7 space-y-2">
+            {verifiedDomains.length > 0 ? (
+              <div className="flex gap-2">
+                <select
+                  value={baseDomainId}
+                  onChange={e => setBaseDomainId(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="h-8 text-xs rounded-md border border-input bg-background px-2 appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring font-mono flex-1"
+                >
+                  <option value="">— Base domain —</option>
+                  {verifiedDomains.map(d => (
+                    <option key={d.id} value={d.id}>{d.domain}</option>
+                  ))}
+                </select>
+                <Input
+                  placeholder="storage"
+                  value={storageSub}
+                  onChange={e => setStorageSub(e.target.value)}
+                  className="h-8 text-xs w-28"
+                />
+                <Button type="submit" size="sm" disabled={busy || !fullDomainPreview} className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none shrink-0">
+                  {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <Input placeholder="storage.yourdomain.com" value={domainInput} onChange={e => setDomainInput(e.target.value)} className="h-8 text-xs flex-1" required />
+                <Button type="submit" size="sm" disabled={busy} className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
+                  {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                </Button>
+              </div>
+            )}
+            {fullDomainPreview && verifiedDomains.length > 0 && (
+              <p className="text-[11px] text-muted-foreground font-mono">→ <span className="text-foreground">{fullDomainPreview}</span></p>
+            )}
           </form>
         ) : (
           <div className="ml-7 flex items-center gap-2">

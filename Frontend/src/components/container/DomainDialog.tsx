@@ -4,14 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Globe, CheckCircle, XCircle, Copy, Loader2, RefreshCw, Trash2, Zap, Code2, ChevronDown, ChevronUp } from "lucide-react";
+import { Globe, CheckCircle, XCircle, Copy, Loader2, RefreshCw, Trash2, Zap, Code2, ChevronDown, ChevronUp, ShieldCheck, ExternalLink } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
 import {
-  useGetBaseDomain, baseDomainSave, baseDomainVerify,
+  useGetBaseDomain, baseDomainSave,
   containerDomainGet, containerDomainAssign, containerDomainNginx,
   containerDomainDelete, containerDomainRegenerate,
   containerDomainTraefik, traefikComposeSnippet,
-  type ContainerDomain, type BaseDomainConfig,
+  useGetVerifiedDomains,
+  type ContainerDomain, type VerifiedDomain,
 } from "@/api/client";
 
 interface Props { containerName: string; open: boolean; onClose: () => void }
@@ -20,14 +22,15 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
   const qc = useQueryClient();
   const { data: baseData } = useGetBaseDomain();
   const baseCfg = baseData?.config || null;
+  const { data: domainsData } = useGetVerifiedDomains();
+  const verifiedDomains: VerifiedDomain[] = (domainsData?.domains ?? []).filter(d => d.verified);
 
   const [domain, setDomain] = useState<ContainerDomain | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [baseDomainInput, setBaseDomainInput] = useState("");
-  const [vpsIpInput, setVpsIpInput] = useState("");
-  const [verifying, setVerifying] = useState(false);
-  const [verifyResult, setVerifyResult] = useState<any>(null);
+  // Step 1: domain picker
+  const [selectedDomainId, setSelectedDomainId] = useState<number | "">("");
+  const [savingBase, setSavingBase] = useState(false);
 
   const [port, setPort] = useState("");
   const [customSub, setCustomSub] = useState("");
@@ -48,38 +51,36 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
       .finally(() => setLoading(false));
   }, [open, containerName]);
 
+  // Pre-select the base domain if it matches one of the verified domains
   useEffect(() => {
-    if (baseCfg) {
-      setBaseDomainInput(baseCfg.domain || "");
-      setVpsIpInput(baseCfg.vps_ip || "");
+    if (baseCfg?.domain && verifiedDomains.length > 0 && selectedDomainId === "") {
+      const match = verifiedDomains.find(d => d.domain === baseCfg.domain);
+      if (match) setSelectedDomainId(match.id);
     }
-  }, [baseCfg]);
+  }, [baseCfg, verifiedDomains]);
+
+  const selectedVd = verifiedDomains.find(d => d.id === selectedDomainId) ?? null;
+  const baseVerified = !!selectedVd || !!baseCfg?.verified;
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["base-domain"] });
     containerDomainGet(containerName).then(r => setDomain(r.domain)).catch(() => {});
   };
 
-  async function handleSaveBase() {
-    if (!baseDomainInput.trim() || !vpsIpInput.trim()) return;
+  async function handleSelectDomain(id: number | "") {
+    setSelectedDomainId(id);
+    if (id === "") return;
+    const vd = verifiedDomains.find(d => d.id === id);
+    if (!vd) return;
+    setSavingBase(true);
     try {
-      await baseDomainSave(baseDomainInput.trim(), vpsIpInput.trim());
-      toast.success("Domain saved");
+      await baseDomainSave(vd.domain, vd.vps_ip);
       qc.invalidateQueries({ queryKey: ["base-domain"] });
-    } catch (err: any) { toast.error(err.message); }
-  }
-
-  async function handleVerify() {
-    setVerifying(true);
-    setVerifyResult(null);
-    try {
-      const r = await baseDomainVerify();
-      setVerifyResult(r);
-      qc.invalidateQueries({ queryKey: ["base-domain"] });
-      if (r.verified) toast.success("Domain verified!");
-      else toast.warning("DNS not propagated yet — try again in a few minutes");
-    } catch (err: any) { toast.error(err.message); }
-    finally { setVerifying(false); }
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setSavingBase(false);
+    }
   }
 
   async function handleAssign() {
@@ -108,7 +109,7 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
     setEnablingTraefik(true);
     try {
       await containerDomainTraefik(containerName);
-      toast.success("Traefik labels applied — container restarted");
+      toast.success("Traefik labels applied — container restarting in background");
       refresh();
     } catch (err: any) { toast.error(err.message); }
     finally { setEnablingTraefik(false); }
@@ -144,8 +145,6 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
     navigator.clipboard.writeText(text).then(() => toast.success("Copied!"));
   }
 
-  const baseVerified = baseCfg?.verified;
-
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-[620px] p-0 gap-0 overflow-hidden">
@@ -154,45 +153,63 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
             <Globe className="w-4 h-4 text-muted-foreground" />
             Domain — {containerName}
           </DialogTitle>
-          <DialogDescription className="text-xs">Route a subdomain to this container via nginx.</DialogDescription>
+          <DialogDescription className="text-xs">Route a subdomain to this container via nginx or Traefik.</DialogDescription>
         </DialogHeader>
 
         <div className="max-h-[520px] overflow-y-auto p-4 space-y-4">
 
-          {/* ── Step 1: Base domain ── */}
+          {/* ── Step 1: Choose verified base domain ── */}
           <div className="rounded-xl border border-border overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 bg-muted/30 border-b border-border">
               <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Step 1 — Base Domain</span>
-              {baseVerified && <Badge className="text-[10px] py-0 px-1.5 rounded-full bg-emerald-500/15 text-emerald-500 border-emerald-500/30">Verified</Badge>}
+              {baseVerified && (
+                <Badge className="text-[10px] py-0 px-1.5 rounded-full bg-emerald-500/15 text-emerald-500 border-emerald-500/30 gap-1">
+                  <ShieldCheck className="w-3 h-3" />Verified
+                </Badge>
+              )}
             </div>
             <div className="p-4 space-y-3">
-              <p className="text-xs text-muted-foreground">Add these DNS records at your registrar, then click Verify:</p>
-              <div className="bg-muted/50 rounded-lg p-3 font-mono text-[11px] text-foreground space-y-1">
-                <div>A &nbsp;&nbsp;<span className="text-muted-foreground">@</span>&nbsp;&nbsp;→ <span className="text-primary">{vpsIpInput || "YOUR.VPS.IP"}</span></div>
-                <div>A &nbsp;&nbsp;<span className="text-muted-foreground">*</span>&nbsp;&nbsp;→ <span className="text-primary">{vpsIpInput || "YOUR.VPS.IP"}</span></div>
-              </div>
-              <div className="flex gap-2">
-                <Input placeholder="yourdomain.com" value={baseDomainInput} onChange={e => setBaseDomainInput(e.target.value)} className="h-8 text-xs flex-1" />
-                <Input placeholder="VPS IP" value={vpsIpInput} onChange={e => setVpsIpInput(e.target.value)} className="h-8 text-xs w-36" />
-                <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" onClick={handleSaveBase}>Save</Button>
-              </div>
-              <Button
-                variant="outline" size="sm" className="h-8 text-xs w-full"
-                onClick={handleVerify} disabled={verifying || !baseDomainInput.trim()}
-              >
-                {verifying ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />Checking DNS…</> : "Verify DNS"}
-              </Button>
-              {verifyResult && (
-                <div className="text-[11px] space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    {verifyResult.apexOk ? <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> : <XCircle className="w-3.5 h-3.5 text-destructive" />}
-                    <span>Apex ({baseDomainInput}) → {verifyResult.apexIps.join(", ") || "not resolved"}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {verifyResult.wildcardOk ? <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> : <XCircle className="w-3.5 h-3.5 text-destructive" />}
-                    <span>Wildcard (*.{baseDomainInput}) → {verifyResult.wildcardIps.join(", ") || "not resolved"}</span>
-                  </div>
+              {verifiedDomains.length === 0 ? (
+                <div className="flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    No verified domains yet. Add and verify a domain first.
+                  </p>
+                  <Link href="/domains" onClick={onClose}>
+                    <button className="text-xs text-primary hover:underline flex items-center gap-1 ml-3 shrink-0">
+                      Go to Domains <ExternalLink className="w-3 h-3" />
+                    </button>
+                  </Link>
                 </div>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">Select a verified domain to use as the base for this container's subdomain.</p>
+                  <div className="relative">
+                    <select
+                      value={selectedDomainId}
+                      onChange={e => handleSelectDomain(e.target.value === "" ? "" : Number(e.target.value))}
+                      className="w-full h-8 text-xs rounded-md border border-input bg-background px-3 pr-8 appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="">— Select a domain —</option>
+                      {verifiedDomains.map(d => (
+                        <option key={d.id} value={d.id}>{d.domain}</option>
+                      ))}
+                    </select>
+                    {savingBase && (
+                      <Loader2 className="w-3 h-3 animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    )}
+                  </div>
+                  {selectedVd && (
+                    <div className="font-mono text-[11px] text-muted-foreground space-y-0.5 bg-muted/40 rounded-lg px-3 py-2">
+                      <div>A &nbsp;<span className="text-foreground/50">@</span>&nbsp; → <span className="text-foreground">{selectedVd.vps_ip}</span></div>
+                      <div>A &nbsp;<span className="text-foreground/50">*</span>&nbsp; → <span className="text-foreground">{selectedVd.vps_ip}</span></div>
+                    </div>
+                  )}
+                  {!selectedVd && baseCfg?.verified && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Currently using: <span className="font-mono text-foreground">{baseCfg.domain}</span>
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -237,6 +254,11 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
                     <Input placeholder="Port (e.g. 3000)" value={port} onChange={e => setPort(e.target.value)} className="h-8 text-xs w-32 shrink-0" type="number" />
                     <Input placeholder="Subdomain (optional, auto-generated)" value={customSub} onChange={e => setCustomSub(e.target.value)} className="h-8 text-xs flex-1" />
                   </div>
+                  {selectedVd && customSub && (
+                    <p className="text-[11px] text-muted-foreground font-mono">
+                      → <span className="text-foreground">{customSub}.{selectedVd.domain}</span>
+                    </p>
+                  )}
                   <Button size="sm" className="h-8 text-xs w-full bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] border border-black/10 dark:border-white/10 shadow-none"
                     onClick={handleAssign} disabled={assigning || !port}>
                     {assigning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Generate Domain"}
@@ -262,7 +284,6 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
                 )}
               </div>
               <div className="p-4 space-y-3">
-                {/* Active state */}
                 {(domain as any).traefik_enabled && (
                   <div className="flex items-center gap-2 text-xs text-purple-400 mb-1">
                     <CheckCircle className="w-4 h-4" />
@@ -276,9 +297,7 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
                   </div>
                 )}
 
-                {/* Two-column choice */}
                 <div className="grid grid-cols-2 gap-2">
-                  {/* Nginx */}
                   <div className="rounded-lg border border-border p-3 space-y-2">
                     <div className="text-xs font-medium flex items-center gap-1.5"><Zap className="w-3.5 h-3.5 text-muted-foreground" />Nginx</div>
                     <p className="text-[11px] text-muted-foreground">Write config file to shared volume and reload nginx.</p>
@@ -288,7 +307,6 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
                     </Button>
                   </div>
 
-                  {/* Traefik */}
                   <div className="rounded-lg border border-border p-3 space-y-2">
                     <div className="text-xs font-medium flex items-center gap-1.5">
                       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
@@ -303,7 +321,6 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
                   </div>
                 </div>
 
-                {/* Traefik compose snippet */}
                 <div className="rounded-lg border border-border/50 bg-muted/10 overflow-hidden">
                   <button
                     className="flex items-center gap-2 w-full px-3 py-2 text-[11px] text-muted-foreground hover:text-foreground transition-colors"

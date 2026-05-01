@@ -9,7 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { useTheme } from "@/hooks/use-theme";
-import { useGetProxyDomains, getServerIp, createProxyDomain, verifyProxyDomain, enableProxySSL, deleteProxyDomain, reloadProxy, type ProxyDomain } from "@/api/client";
+import { useGetProxyDomains, getServerIp, createProxyDomain, verifyProxyDomain, enableProxySSL, deleteProxyDomain, reloadProxy, useGetVerifiedDomains, type ProxyDomain } from "@/api/client";
 import { getSocket } from "@/api/socket";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -25,9 +25,19 @@ export default function ProxyPage() {
   const [serverIp, setServerIp] = useState<string>("");
   const [showCreate, setShowCreate] = useState(false);
 
+  const { data: vdData } = useGetVerifiedDomains();
+  const verifiedDomains = (vdData?.domains ?? []).filter(d => d.verified);
+
+  const [baseDomainId, setBaseDomainId] = useState<number | "">("");
+  const [subdomain, setSubdomain] = useState("");
   const [domain, setDomain] = useState("");
   const [targetPort, setTargetPort] = useState("");
   const [creating, setCreating] = useState(false);
+
+  const selectedVd = verifiedDomains.find(d => d.id === baseDomainId) ?? null;
+  const fullDomainPreview = selectedVd
+    ? (subdomain.trim() ? `${subdomain.trim()}.${selectedVd.domain}` : selectedVd.domain)
+    : domain;
 
   const [verifying, setVerifying] = useState(false);
 
@@ -81,13 +91,14 @@ export default function ProxyPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!domain.trim() || !targetPort.trim()) return;
+    const finalDomain = fullDomainPreview.trim();
+    if (!finalDomain || !targetPort.trim()) return;
     setCreating(true);
     try {
-      await createProxyDomain(domain.trim(), Number(targetPort));
-      toast.success(`${domain} proxy created`);
+      await createProxyDomain(finalDomain, Number(targetPort));
+      toast.success(`${finalDomain} proxy created`);
       qc.invalidateQueries({ queryKey: ["proxy-domains"] });
-      setDomain(""); setTargetPort(""); setShowCreate(false);
+      setDomain(""); setSubdomain(""); setBaseDomainId(""); setTargetPort(""); setShowCreate(false);
     } catch (err: any) {
       toast.error(err.message || "Failed to create proxy");
     } finally { setCreating(false); }
@@ -191,20 +202,55 @@ export default function ProxyPage() {
             <Card className="bg-background border-border shadow-none rounded-xl">
               <CardHeader className="p-4 pb-2">
                 <CardTitle className="text-sm font-medium">Add Reverse Proxy</CardTitle>
-                <CardDescription className="text-xs text-muted-foreground">Enter the domain and the local port the app is listening on.</CardDescription>
+                <CardDescription className="text-xs text-muted-foreground">
+                  Pick a verified domain, enter a subdomain, and the local port your app listens on.
+                </CardDescription>
               </CardHeader>
               <CardContent className="p-4 pt-2">
-                <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-3">
-                  <div className="flex-1 space-y-1">
-                    <Label className="text-xs text-muted-foreground">Domain / Subdomain</Label>
-                    <Input value={domain} onChange={e => setDomain(e.target.value)} placeholder="app.example.com" className="font-mono text-xs h-9" />
+                <form onSubmit={handleCreate} className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {verifiedDomains.length > 0 ? (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Base Domain</Label>
+                        <select
+                          value={baseDomainId}
+                          onChange={e => setBaseDomainId(e.target.value === "" ? "" : Number(e.target.value))}
+                          className="w-full h-9 text-xs rounded-md border border-input bg-background px-3 appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+                        >
+                          <option value="">— Select —</option>
+                          {verifiedDomains.map(d => (
+                            <option key={d.id} value={d.id}>{d.domain}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Domain</Label>
+                        <Input value={domain} onChange={e => setDomain(e.target.value)} placeholder="app.example.com" className="font-mono text-xs h-9" />
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Subdomain {!verifiedDomains.length && "(optional)"}</Label>
+                      <Input
+                        value={subdomain}
+                        onChange={e => setSubdomain(e.target.value)}
+                        placeholder={verifiedDomains.length ? "app, api, www…" : "leave blank for root"}
+                        className="font-mono text-xs h-9"
+                        disabled={!verifiedDomains.length}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Target Port</Label>
+                      <Input value={targetPort} onChange={e => setTargetPort(e.target.value)} placeholder="8000" type="number" min={1} max={65535} className="font-mono text-xs h-9" />
+                    </div>
                   </div>
-                  <div className="w-full sm:w-36 space-y-1">
-                    <Label className="text-xs text-muted-foreground">Target Port</Label>
-                    <Input value={targetPort} onChange={e => setTargetPort(e.target.value)} placeholder="8000" type="number" min={1} max={65535} className="font-mono text-xs h-9" />
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <Button type="submit" disabled={creating || !domain.trim() || !targetPort.trim()} className="h-9 px-5 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
+                  {fullDomainPreview && (
+                    <p className="text-[11px] text-muted-foreground font-mono">
+                      → <span className="text-foreground">{fullDomainPreview}</span> : {targetPort || "?"}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={creating || !fullDomainPreview.trim() || !targetPort.trim()} className="h-9 px-5 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
                       {creating && <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />}Create
                     </Button>
                     <Button type="button" variant="ghost" className="h-9 px-3 text-xs" onClick={() => setShowCreate(false)}>Cancel</Button>

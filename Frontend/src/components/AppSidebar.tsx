@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Menu, LogOut, Server, Terminal, Container, GitBranch, Globe, PlugZap, Clock, Database } from "lucide-react";
+import { Menu, LogOut, Server, Terminal, Container, GitBranch, Globe, PlugZap, Clock, Database, ShieldCheck } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -111,6 +111,7 @@ const navItems: NavItem[] = [
     { label: "Docker", icon: <Container className="w-4 h-4" strokeWidth={1.5} />, href: "/docker" },
     { label: "Auto Deploy", icon: <GitBranch className="w-4 h-4" strokeWidth={1.5} />, href: "/deploy" },
     { label: "Reverse Proxy", icon: <Globe className="w-4 h-4" strokeWidth={1.5} />, href: "/proxy" },
+    { label: "Domains", icon: <ShieldCheck className="w-4 h-4" strokeWidth={1.5} />, href: "/domains" },
     { label: "Scheduler", icon: <Clock className="w-4 h-4" strokeWidth={1.5} />, href: "/scheduler" },
     { label: "Storage", icon: <Database className="w-4 h-4" strokeWidth={1.5} />, href: "/storage" },
 ];
@@ -163,6 +164,7 @@ function SidebarNav({ onSelect }: { onSelect?: () => void }) {
             <NavLink item={navItems[11]} onSelect={onSelect} />
             <NavLink item={navItems[12]} onSelect={onSelect} />
             <NavLink item={navItems[13]} onSelect={onSelect} />
+            <NavLink item={navItems[14]} onSelect={onSelect} />
         </nav>
     );
 }

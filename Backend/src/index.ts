@@ -17,6 +17,7 @@ import proxyRoutes from './routes/proxy';
 import schedulerRoutes from './routes/scheduler';
 import storageRoutes from './routes/storage';
 import containerMgmtRoutes, { initContainerManagement } from './routes/containerManagement';
+import domainsRoutes from './routes/domains';
 import { registerSshSocketHandlers } from './routes/ssh';
 import { registerDockerExecSocketHandlers } from './routes/docker';
 import { setIo } from './lib/socket';
@@ -79,6 +80,7 @@ app.use('/api/proxy', proxyRoutes);
 app.use('/api/scheduler', schedulerRoutes);
 app.use('/api/storage', storageRoutes);
 app.use('/api/mgmt', containerMgmtRoutes);
+app.use('/api/domains', domainsRoutes);
 
 // ── Socket.IO JWT handshake middleware ────────────────────────────────────────
 // Reject any socket that does not present a valid bearer token. Authenticated
