@@ -1,0 +1,311 @@
+import {
+  Plus,
+  MessageSquare,
+  Search,
+  Settings,
+  Sparkles,
+  PanelLeftClose,
+  MoreHorizontal,
+  Pin,
+  PinOff,
+  Pencil,
+  Trash2,
+  User,
+  CreditCard,
+  Moon,
+  Sun,
+  LogOut,
+  ChevronUp,
+} from "lucide-react";
+import Avatar, { genConfig } from "react-nice-avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
+import { Conversation } from "@/types/chat";
+import { useIsMobile } from "@/hooks/use-mobile";
+
+interface SidebarProps {
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+  conversations: Conversation[];
+  activeId: string | null;
+  setActiveId: (id: string | null) => void;
+  onNewChat: () => void;
+  onDeleteChat: (id: string) => void;
+  onTogglePin: (id: string) => void;
+  onStartRename: (c: Conversation) => void;
+  renamingId: string | null;
+  renameValue: string;
+  setRenameValue: (val: string) => void;
+  onCommitRename: () => void;
+  setRenamingId: (id: string | null) => void;
+  isDark: boolean;
+  toggleTheme: (event?: { clientX: number; clientY: number } | null) => void;
+  onSelectConversation: (c: Conversation) => void;
+}
+
+export const Sidebar = ({
+  isOpen,
+  setIsOpen,
+  conversations,
+  activeId,
+  setActiveId,
+  onNewChat,
+  onDeleteChat,
+  onTogglePin,
+  onStartRename,
+  renamingId,
+  renameValue,
+  setRenameValue,
+  onCommitRename,
+  setRenamingId,
+  isDark,
+  toggleTheme,
+  onSelectConversation,
+}: SidebarProps) => {
+  const isMobile = useIsMobile();
+  const grouped = conversations.reduce<Record<string, Conversation[]>>((acc, c) => {
+    const key = c.pinned ? "Pinned" : c.updatedAt;
+    (acc[key] ||= []).push(c);
+    return acc;
+  }, {});
+
+  const groupOrder = ["Pinned", ...Array.from(new Set(conversations.map((c) => c.updatedAt)))];
+  const orderedGroups = groupOrder
+    .filter((k) => grouped[k]?.length)
+    .map((k) => [k, grouped[k]] as const);
+
+  const userAvatarConfig = genConfig("user@revengpt.com");
+
+  return (
+    <aside
+      className={`${
+        isOpen ? (isMobile ? "w-80 translate-x-0" : "w-72") : (isMobile ? "w-80 -translate-x-full" : "w-0")
+      } transition-all duration-300 overflow-hidden border-r border-border bg-background flex flex-col ${
+        isMobile ? "fixed inset-y-0 left-0 z-50 shadow-2xl" : "relative bg-secondary/40"
+      }`}
+    >
+      <div className="p-3 flex items-center justify-between">
+        <div className="flex items-center gap-2 px-2">
+          <div className="h-8 w-8 rounded-lg flex items-center justify-center">
+            <img src="/logo.png" alt="" />
+          </div>
+          <span className="font-display font-semibold text-base">RevenGPT</span>
+        </div>
+        <button
+          onClick={() => setIsOpen(false)}
+          className="p-2 rounded-lg hover:bg-background text-muted-foreground"
+          aria-label="Close sidebar"
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="px-3 space-y-1">
+        <button
+          onClick={onNewChat}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-background border border-border hover:border-primary hover:text-primary text-sm font-semibold transition-colors"
+        >
+          <Plus className="h-4 w-4" />
+          New chat
+        </button>
+        <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-background text-sm font-medium text-muted-foreground transition-colors">
+          <Search className="h-4 w-4" />
+          Search chats
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scrollbar-thin mt-4 px-3 pb-4">
+        {orderedGroups.map(([label, items]) => (
+          <div key={label} className="mb-4">
+            <div className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              {label === "Pinned" && <Pin className="h-3 w-3" />}
+              {label}
+            </div>
+            <ul className="space-y-0.5">
+              {items.map((c) => {
+                const isActive = activeId === c.id;
+                const isRenaming = renamingId === c.id;
+                return (
+                  <li key={c.id}>
+                    <div
+                      onClick={() => {
+                        if (isRenaming) return;
+                        onSelectConversation(c);
+                      }}
+                      className={`group relative w-full flex items-center justify-between gap-2 pl-3 pr-1.5 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
+                        isActive
+                          ? "bg-background text-foreground font-medium"
+                          : "text-foreground/80 hover:bg-background"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        {c.pinned ? (
+                          <Pin className="h-3.5 w-3.5 shrink-0 text-primary fill-primary" />
+                        ) : (
+                          <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        {isRenaming ? (
+                          <input
+                            autoFocus
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") onCommitRename();
+                              if (e.key === "Escape") setRenamingId(null);
+                            }}
+                            onBlur={onCommitRename}
+                            className="flex-1 min-w-0 bg-background border border-primary rounded-md px-2 py-0.5 text-sm outline-none"
+                          />
+                        ) : (
+                          <span className="truncate">{c.title}</span>
+                        )}
+                      </div>
+                      {!isRenaming && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label="Conversation options"
+                              className="p-1 rounded-md opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 hover:bg-secondary text-muted-foreground hover:text-foreground transition-opacity"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            side="right"
+                            sideOffset={6}
+                            className="w-44 rounded-xl p-1.5 shadow-lg"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <DropdownMenuItem
+                              onSelect={() => onTogglePin(c.id)}
+                              className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5"
+                            >
+                              {c.pinned ? (
+                                <PinOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Pin className="h-4 w-4 text-muted-foreground" />
+                              )}
+                              <span className="flex-1">{c.pinned ? "Unpin" : "Pin"}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => onStartRename(c)}
+                              className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5"
+                            >
+                              <Pencil className="h-4 w-4 text-muted-foreground" />
+                              <span className="flex-1">Rename</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onSelect={() => onDeleteChat(c.id)}
+                              className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-destructive focus:text-destructive focus:bg-destructive/10"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span className="flex-1">Delete</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t border-border p-3 space-y-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-background transition-colors group">
+              <div className="h-9 w-9 rounded-full overflow-hidden flex items-center justify-center shrink-0">
+                <Avatar className="h-full w-full" {...userAvatarConfig} />
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <div className="text-sm font-semibold truncate">Alex Chen</div>
+                <div className="text-xs text-muted-foreground truncate">user@revengpt.com</div>
+              </div>
+              <ChevronUp className="h-4 w-4 text-muted-foreground opacity-60 group-hover:opacity-100 transition-opacity" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="top"
+            align="end"
+            sideOffset={8}
+            className="w-64 rounded-2xl p-1.5 shadow-lg"
+          >
+            <DropdownMenuLabel className="px-3 py-2.5">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full overflow-hidden flex items-center justify-center">
+                  <Avatar className="h-full w-full" {...userAvatarConfig} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold truncate">Hello</div>
+                  <div className="text-xs font-normal text-muted-foreground truncate">
+                    user@revengpt.com
+                  </div>
+                </div>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="px-3 py-2.5 rounded-lg cursor-pointer gap-3">
+              <User className="h-4 w-4 text-muted-foreground" />
+              <span className="flex-1">View Profile</span>
+              <DropdownMenuShortcut>⌘F</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem className="px-3 py-2.5 rounded-lg cursor-pointer gap-3">
+              <Settings className="h-4 w-4 text-muted-foreground" />
+              <span className="flex-1">Settings</span>
+              <DropdownMenuShortcut>⌘G</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem className="px-3 py-2.5 rounded-lg cursor-pointer gap-3">
+              <CreditCard className="h-4 w-4 text-muted-foreground" />
+              <span className="flex-1">Subscription</span>
+              <DropdownMenuShortcut>⌘⌥D</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.preventDefault();
+                toggleTheme({ clientX: e.clientX, clientY: e.clientY });
+              }}
+              className="px-3 py-2.5 rounded-lg cursor-pointer gap-3"
+            >
+              {isDark ? (
+                <Sun className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Moon className="h-4 w-4 text-muted-foreground" />
+              )}
+              <span className="flex-1">Dark Mode</span>
+              <Switch
+                checked={isDark}
+                onCheckedChange={() => {}}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleTheme({ clientX: e.clientX, clientY: e.clientY });
+                }}
+                aria-label="Toggle dark mode"
+              />
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="px-3 py-2.5 rounded-lg cursor-pointer gap-3 text-destructive focus:text-destructive focus:bg-destructive/10">
+              <LogOut className="h-4 w-4" />
+              <span className="flex-1">Sign Out</span>
+              <DropdownMenuShortcut className="text-destructive/70">⌘Q</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </aside>
+  );
+};

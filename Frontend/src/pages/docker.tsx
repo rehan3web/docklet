@@ -434,33 +434,42 @@ function ContainerMenu({ container, onSelect }: { container: DockerContainer; on
           <MoreHorizontal className="w-4 h-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("logs")}>
-          <FileText className="w-3.5 h-3.5" /> View Logs
+      <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-lg">
+        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("logs")}>
+          <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="flex-1">View Logs</span>
         </DropdownMenuItem>
-        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("network")}>
-          <Network className="w-3.5 h-3.5" /> View Network
+        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("network")}>
+          <Network className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="flex-1">View Network</span>
         </DropdownMenuItem>
-        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("mounts")}>
-          <HardDrive className="w-3.5 h-3.5" /> View Mounts
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("terminal")} disabled={container.state !== "running"}>
-          <Terminal className="w-3.5 h-3.5" /> Open Terminal
-          {container.state !== "running" && <span className="ml-auto text-[10px] text-muted-foreground">not running</span>}
+        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("mounts")}>
+          <HardDrive className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="flex-1">View Mounts</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("env")}>
-          <KeyRound className="w-3.5 h-3.5" /> Environment Variables
+        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("terminal")} disabled={container.state !== "running"}>
+          <Terminal className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="flex-1">Open Terminal</span>
+          {container.state !== "running" && <span className="text-[10px] text-muted-foreground">offline</span>}
         </DropdownMenuItem>
-        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("scheduler")}>
-          <Clock className="w-3.5 h-3.5" /> Scheduler
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("env")}>
+          <KeyRound className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="flex-1">Environment Vars</span>
         </DropdownMenuItem>
-        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("domain")}>
-          <Globe className="w-3.5 h-3.5" /> Domain
+        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("scheduler")}>
+          <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="flex-1">Scheduler</span>
         </DropdownMenuItem>
-        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("backup")}>
-          <HardDrive className="w-3.5 h-3.5 text-amber-500" /> Backups
+        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("domain")}>
+          <Globe className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="flex-1">Domain</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("backup")}>
+          <HardDrive className="w-3.5 h-3.5 text-amber-500" />
+          <span className="flex-1">Backups</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
