@@ -295,7 +295,7 @@ export default function BackupDialog({ containerName, open, onClose }: Props) {
                               <div className="flex-1 min-w-0">
                                 <p className="text-[11px] font-mono truncate">{f.key?.split("/").pop()}</p>
                                 <p className="text-[10px] text-muted-foreground">
-                                  {f.lastModified ? format(new Date(f.lastModified), "MMM d yyyy HH:mm") : ""} · {f.size ? `${(f.size / 1024 / 1024).toFixed(1)} MB` : ""}
+                                  {f.lastModified ? format(new Date(f.lastModified), "MMM d yyyy HH:mm") : ""} · {f.size != null ? (f.size >= 1024 * 1024 ? `${(f.size / 1024 / 1024).toFixed(1)} MB` : f.size >= 1024 ? `${(f.size / 1024).toFixed(1)} KB` : `${f.size} B`) : ""}
                                 </p>
                               </div>
                             </label>
