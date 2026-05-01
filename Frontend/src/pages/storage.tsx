@@ -19,7 +19,7 @@ import {
   useGetStorageConnection, useGetStorageBuckets, useGetStorageFiles,
   useGetStorageInstance, useGetStorageDomain,
   storageConnect, storageDisconnect, storageCreateBucket, storageDeleteBucket,
-  storageDeleteFiles, storageRenameFile, storageDownloadUrl, storageUploadFile,
+  storageDeleteFiles, storageRenameFile, storageDownloadUrl, storageUploadFile, storageCreateFolder,
   storageCreateInstance, storageInstanceHealth, storageDestroyInstance,
   storageAddDomain, storageVerifyDomain, storageSetupNginx, storageRemoveDomain,
   storageGetBucketPolicy, storageSetBucketPolicy, storageShareFile,
@@ -957,8 +957,7 @@ export default function StoragePage() {
     if (!newFolderName.trim() || !selectedBucket) return;
     setCreatingFolder(true);
     try {
-      const placeholder = new File([""], ".keep", { type: "application/octet-stream" });
-      await storageUploadFile(selectedBucket, placeholder, `${currentFolder}${newFolderName.trim()}/.keep`);
+      await storageCreateFolder(selectedBucket, `${currentFolder}${newFolderName.trim()}/`);
       toast.success(`Folder "${newFolderName.trim()}" created`);
       setNewFolderName("");
       setShowCreateFolder(false);

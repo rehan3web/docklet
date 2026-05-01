@@ -816,6 +816,22 @@ export async function storageUploadFile(bucket: string, file: File, key: string,
   });
 }
 
+export async function storageCreateFolder(bucket: string, folderPrefix: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const token = localStorage.getItem("nextbase_token");
+    const fd = new FormData();
+    const blob = new Blob([""], { type: "application/octet-stream" });
+    fd.append("file", blob, ".keep");
+    fd.append("key", `${folderPrefix}.keep`);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/storage/buckets/${encodeURIComponent(bucket)}/files`);
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) resolve(); else reject(new Error(xhr.responseText || "Failed to create folder")); };
+    xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.send(fd);
+  });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONTAINER MANAGEMENT — Env Vars, Scheduler, Domain, Backup
 // ═══════════════════════════════════════════════════════════════════════════════
