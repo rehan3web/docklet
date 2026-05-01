@@ -1,6 +1,7 @@
 import { copyToClipboard } from "@/lib/utils";
 import React, { useEffect, useRef, useState } from "react";
-import { Globe, Shield, ShieldCheck, RefreshCw, Plus, Trash2, CheckCircle2, XCircle, Clock, Loader2, Sun, Moon, Copy, ChevronRight } from "lucide-react";
+import { Globe, Shield, ShieldCheck, RefreshCw, Plus, Trash2, CheckCircle2, XCircle, Clock, Loader2, Sun, Moon, Copy, ChevronRight, ChevronDown } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -213,16 +214,22 @@ export default function ProxyPage() {
                     {verifiedDomains.length > 0 ? (
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Base Domain</Label>
-                        <select
-                          value={baseDomainId}
-                          onChange={e => setBaseDomainId(e.target.value === "" ? "" : Number(e.target.value))}
-                          className="w-full h-9 text-xs rounded-md border border-input bg-background px-3 appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring font-mono"
-                        >
-                          <option value="">— Select —</option>
-                          {verifiedDomains.map(d => (
-                            <option key={d.id} value={d.id}>{d.domain}</option>
-                          ))}
-                        </select>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" className="w-full h-9 text-xs justify-between font-mono px-3">
+                              <span className={baseDomainId === "" ? "text-muted-foreground" : ""}>{baseDomainId === "" ? "— Select —" : (verifiedDomains.find(d => d.id === baseDomainId)?.domain ?? "— Select —")}</span>
+                              <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-50" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="w-full min-w-[200px] rounded-xl p-1.5 shadow-lg">
+                            <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer text-xs text-muted-foreground" onClick={() => setBaseDomainId("")}>— Select —</DropdownMenuItem>
+                            {verifiedDomains.map(d => (
+                              <DropdownMenuItem key={d.id} className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs font-mono" onClick={() => setBaseDomainId(d.id)}>
+                                <Globe className="w-3.5 h-3.5 text-muted-foreground shrink-0" />{d.domain}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     ) : (
                       <div className="space-y-1">
