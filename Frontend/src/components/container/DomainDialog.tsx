@@ -1,6 +1,7 @@
 import { copyToClipboard } from "@/lib/utils";
 import React, { useState, useEffect } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,7 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
   const [assigning, setAssigning] = useState(false);
   const [enablingNginx, setEnablingNginx] = useState(false);
   const [enablingTraefik, setEnablingTraefik] = useState(false);
+  const [traefikConfirmOpen, setTraefikConfirmOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [traefikSnippet, setTraefikSnippet] = useState<string | null>(null);
   const [showSnippet, setShowSnippet] = useState(false);
@@ -106,8 +108,12 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
     finally { setEnablingNginx(false); }
   }
 
-  async function handleEnableTraefik() {
-    if (!confirm("This will stop, remove and recreate the container with Traefik labels. Continue?")) return;
+  function handleEnableTraefik() {
+    setTraefikConfirmOpen(true);
+  }
+
+  async function confirmEnableTraefik() {
+    setTraefikConfirmOpen(false);
     setEnablingTraefik(true);
     try {
       await containerDomainTraefik(containerName);
@@ -148,6 +154,21 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
   }
 
   return (
+    <>
+    <AlertDialog open={traefikConfirmOpen} onOpenChange={setTraefikConfirmOpen}>
+      <AlertDialogContent className="max-w-sm rounded-2xl">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-sm font-semibold">Apply Traefik Labels?</AlertDialogTitle>
+          <AlertDialogDescription className="text-xs text-muted-foreground">
+            This will stop, remove and recreate the container with Traefik labels. The container will restart automatically in the background.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="gap-2">
+          <AlertDialogCancel className="h-8 text-xs rounded-lg">Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={confirmEnableTraefik} className="h-8 text-xs rounded-lg border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">Continue</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <Dialog open={open} onOpenChange={o => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-[620px] p-0 gap-0 overflow-hidden">
         <DialogHeader className="p-5 pb-3 border-b border-border">
@@ -354,5 +375,6 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
         </div>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
