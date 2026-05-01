@@ -18,7 +18,7 @@ import {
 import { useIsStorageConfigured } from "@/api/client";
 
 const CRON_PRESETS = [
-  { label: "Manual only",    value: "" },
+  { label: "Manual only",    value: "manual" },
   { label: "Every minute",   value: "* * * * *" },
   { label: "Every hour",     value: "0 * * * *" },
   { label: "Every 6 hours",  value: "0 */6 * * *" },
@@ -56,7 +56,7 @@ export default function BackupDialog({ containerName, open, onClose }: Props) {
   const [selectedS3Key, setSelectedS3Key] = useState("");
 
   const isCustom = cronPreset === "custom";
-  const finalCron = isCustom ? customCron : cronPreset;
+  const finalCron = isCustom ? customCron : (cronPreset === "manual" ? "" : cronPreset);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["container-backups", containerName] });
 
