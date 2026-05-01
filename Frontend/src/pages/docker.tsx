@@ -65,22 +65,44 @@ function fmtUptime(ms: number) {
 
 function ContainerStatsCell({ id, running }: { id: string; running: boolean }) {
   const [stats, setStats] = useState<ContainerStats | null>(null);
+  const [errCount, setErrCount] = useState(0);
 
   useEffect(() => {
-    if (!running) { setStats(null); return; }
+    if (!running) { setStats(null); setErrCount(0); return; }
     let cancelled = false;
+    let errorStreak = 0;
+    let timerId: ReturnType<typeof setTimeout>;
+
+    const schedule = (delayMs: number) => {
+      timerId = setTimeout(poll, delayMs);
+    };
+
     const poll = async () => {
+      if (cancelled) return;
       try {
         const s = await getContainerStats(id);
-        if (!cancelled) setStats(s);
-      } catch { /* ignore */ }
+        if (cancelled) return;
+        // If we get zeros with an error field, treat as soft-error but show data
+        setStats(s);
+        if (!(s as any).error) { errorStreak = 0; setErrCount(0); }
+        schedule(6000);
+      } catch {
+        if (cancelled) return;
+        errorStreak++;
+        setErrCount(errorStreak);
+        // Exponential back-off: 10s, 20s, 40s … cap at 60s
+        const delay = Math.min(10000 * Math.pow(2, errorStreak - 1), 60000);
+        if (errorStreak < 6) schedule(delay); // stop after 6 consecutive failures
+      }
     };
+
     poll();
-    const iv = setInterval(poll, 6000);
-    return () => { cancelled = true; clearInterval(iv); };
+    return () => { cancelled = true; clearTimeout(timerId); };
   }, [id, running]);
 
-  if (!running || !stats) return <span className="text-muted-foreground text-xs">—</span>;
+  if (!running) return <span className="text-muted-foreground text-xs">—</span>;
+  if (errCount >= 6) return <span className="text-muted-foreground text-xs" title="Stats unavailable">n/a</span>;
+  if (!stats) return <span className="text-muted-foreground text-xs animate-pulse">…</span>;
 
   const cpuColor = stats.cpuPercent > 80 ? "text-red-400" : stats.cpuPercent > 40 ? "text-amber-400" : "text-emerald-400";
   const memColor = stats.memPercent > 85 ? "text-red-400" : stats.memPercent > 60 ? "text-amber-400" : "text-foreground";

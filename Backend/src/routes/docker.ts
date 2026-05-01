@@ -160,15 +160,45 @@ router.get('/containers/:id/logs', authenticateToken, async (req, res) => {
 });
 
 // ── Container stats (CPU %, RAM, Uptime) ─────────────────────────────────────
+// Use callback form of container.stats() — more reliable across dockerode versions
+// than the promise form which can return a raw stream on some Docker builds.
+function getContainerStatsOnce(container: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Stats timed out')), 6000);
+        try {
+            container.stats({ stream: false }, (err: any, data: any) => {
+                clearTimeout(timer);
+                if (err) { reject(err); return; }
+                // data may be a raw stream (older dockerode) — read first chunk
+                if (data && typeof data.pipe === 'function') {
+                    let raw = '';
+                    data.on('data', (chunk: Buffer) => { raw += chunk.toString(); data.destroy(); });
+                    data.once('close', () => {
+                        try { resolve(JSON.parse(raw)); } catch { reject(new Error('Could not parse stats stream')); }
+                    });
+                    data.on('error', reject);
+                } else {
+                    resolve(data);
+                }
+            });
+        } catch (e) { clearTimeout(timer); reject(e); }
+    });
+}
+
 router.get('/containers/:id/stats', authenticateToken, async (req, res) => {
     const avail = dockerAvailable();
     if (!avail.ok) return res.status(503).json({ message: avail.reason });
     try {
         const container = getDocker().getContainer(String(req.params.id));
-        const [statsRaw, info] = await Promise.all([
-            container.stats({ stream: false }) as Promise<any>,
-            container.inspect(),
-        ]);
+
+        // Inspect first — skip stats if container isn't running
+        const info = await container.inspect();
+        if (!info.State?.Running) {
+            return res.json({ cpuPercent: 0, memUsage: 0, memLimit: 0, memPercent: 0, uptimeMs: 0, netRx: 0, netTx: 0 });
+        }
+
+        const statsRaw = await getContainerStatsOnce(container);
+
         // CPU %
         const cpuDelta = (statsRaw.cpu_stats?.cpu_usage?.total_usage ?? 0) -
                          (statsRaw.precpu_stats?.cpu_usage?.total_usage ?? 0);
@@ -176,22 +206,34 @@ router.get('/containers/:id/stats', authenticateToken, async (req, res) => {
                          (statsRaw.precpu_stats?.system_cpu_usage ?? 0);
         const numCpus = statsRaw.cpu_stats?.online_cpus ?? statsRaw.cpu_stats?.cpu_usage?.percpu_usage?.length ?? 1;
         const cpuPercent = sysDelta > 0 ? (cpuDelta / sysDelta) * numCpus * 100 : 0;
-        // Memory
+
+        // Memory (exclude page cache)
         const cache = statsRaw.memory_stats?.stats?.cache ?? 0;
         const memUsage = Math.max(0, (statsRaw.memory_stats?.usage ?? 0) - cache);
         const memLimit = statsRaw.memory_stats?.limit ?? 0;
+
         // Uptime
         const startedAt = info.State?.StartedAt ? new Date(info.State.StartedAt) : null;
-        const uptimeMs = startedAt && info.State?.Running ? Date.now() - startedAt.getTime() : 0;
+        const uptimeMs = startedAt ? Date.now() - startedAt.getTime() : 0;
+
         // Network I/O
         let netRx = 0, netTx = 0;
         for (const iface of Object.values(statsRaw.networks ?? {})) {
             netRx += (iface as any).rx_bytes ?? 0;
             netTx += (iface as any).tx_bytes ?? 0;
         }
-        res.json({ cpuPercent: Math.min(cpuPercent, 100), memUsage, memLimit, memPercent: memLimit > 0 ? (memUsage / memLimit) * 100 : 0, uptimeMs, netRx, netTx });
+
+        res.json({
+            cpuPercent: Math.min(Math.max(cpuPercent, 0), 100),
+            memUsage, memLimit,
+            memPercent: memLimit > 0 ? (memUsage / memLimit) * 100 : 0,
+            uptimeMs, netRx, netTx,
+        });
     } catch (err: any) {
-        res.status(500).json({ message: err.message });
+        // Return zeros rather than 500 — the frontend treats non-200 as errors
+        // and backs off, but returning zeros keeps the UI clean
+        console.error(`[stats] ${req.params.id.slice(0, 12)} —`, err.message);
+        res.json({ cpuPercent: 0, memUsage: 0, memLimit: 0, memPercent: 0, uptimeMs: 0, netRx: 0, netTx: 0, error: err.message });
     }
 });
 
