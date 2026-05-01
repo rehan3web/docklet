@@ -1,5 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2, MoreHorizontal, FileText, Network, HardDrive, Terminal, X } from "lucide-react";
+import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2, MoreHorizontal, FileText, Network, HardDrive, Terminal, X, KeyRound, Clock, Globe } from "lucide-react";
+import EnvVarsDialog from "@/components/container/EnvVarsDialog";
+import SchedulerDialog from "@/components/container/SchedulerDialog";
+import DomainDialog from "@/components/container/DomainDialog";
+import BackupDialog from "@/components/container/BackupDialog";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -336,7 +340,7 @@ function TerminalDialog({ container, open, onClose }: { container: DockerContain
 }
 
 // ── Three-dot menu ────────────────────────────────────────────────────────────
-type DialogType = "logs" | "network" | "mounts" | "terminal" | null;
+type DialogType = "logs" | "network" | "mounts" | "terminal" | "env" | "scheduler" | "domain" | "backup" | null;
 
 function ContainerMenu({ container, onSelect }: { container: DockerContainer; onSelect: (type: DialogType) => void }) {
   return (
@@ -346,7 +350,7 @@ function ContainerMenu({ container, onSelect }: { container: DockerContainer; on
           <MoreHorizontal className="w-4 h-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("logs")}>
           <FileText className="w-3.5 h-3.5" /> View Logs
         </DropdownMenuItem>
@@ -360,6 +364,19 @@ function ContainerMenu({ container, onSelect }: { container: DockerContainer; on
         <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("terminal")} disabled={container.state !== "running"}>
           <Terminal className="w-3.5 h-3.5" /> Open Terminal
           {container.state !== "running" && <span className="ml-auto text-[10px] text-muted-foreground">not running</span>}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("env")}>
+          <KeyRound className="w-3.5 h-3.5" /> Environment Variables
+        </DropdownMenuItem>
+        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("scheduler")}>
+          <Clock className="w-3.5 h-3.5" /> Scheduler
+        </DropdownMenuItem>
+        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("domain")}>
+          <Globe className="w-3.5 h-3.5" /> Domain
+        </DropdownMenuItem>
+        <DropdownMenuItem className="text-xs gap-2 cursor-pointer" onClick={() => onSelect("backup")}>
+          <HardDrive className="w-3.5 h-3.5 text-amber-500" /> Backups
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -583,6 +600,34 @@ export default function DockerPage() {
       )}
       {activeContainer && activeDialog === "terminal" && (
         <TerminalDialog container={activeContainer} open={true} onClose={closeDialog} />
+      )}
+      {activeContainer && activeDialog === "env" && (
+        <EnvVarsDialog
+          containerName={(activeContainer.names[0] || activeContainer.shortId).replace(/^\//, "")}
+          open={true}
+          onClose={closeDialog}
+        />
+      )}
+      {activeContainer && activeDialog === "scheduler" && (
+        <SchedulerDialog
+          containerName={(activeContainer.names[0] || activeContainer.shortId).replace(/^\//, "")}
+          open={true}
+          onClose={closeDialog}
+        />
+      )}
+      {activeContainer && activeDialog === "domain" && (
+        <DomainDialog
+          containerName={(activeContainer.names[0] || activeContainer.shortId).replace(/^\//, "")}
+          open={true}
+          onClose={closeDialog}
+        />
+      )}
+      {activeContainer && activeDialog === "backup" && (
+        <BackupDialog
+          containerName={(activeContainer.names[0] || activeContainer.shortId).replace(/^\//, "")}
+          open={true}
+          onClose={closeDialog}
+        />
       )}
     </div>
   );

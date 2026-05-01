@@ -1,0 +1,110 @@
+Feature: Advanced Container Management System (Env, Scheduler, Domain, Backup)
+
+Build a complete DevOps management system (Docklet-like) with the following capabilities:
+
+🔹 1. Environment Variables (Per Container)
+Add full environment variable support per Docker container
+User can:
+Add / Edit / Delete env variables via UI
+Store securely (encrypted in backend)
+Inject env into container at runtime
+UI:
+Container → “Settings” → “Environment Variables”
+Key / Value input
+Save & Apply
+Behavior:
+On update → container rebuild/restart with new env
+🔹 2. Per Container Scheduler System ⏱️
+Add scheduler per container (like cron jobs)
+UI:
+Container → “⋮ (three dots)” → “Scheduler”
+Features:
+Add new schedule
+Select:
+Predefined cron (Every minute, hourly, daily)
+Custom cron expression
+Define command to run inside container
+Actions:
+Run manually
+Enable / Disable
+Edit / Delete
+View logs
+Execution:
+Scheduler runs command inside specific container
+🔹 3. Auto Domain Generation + Verification 🌐
+Flow:
+Step 1: One-time domain verification
+User enters base domain (e.g. yourdomain.com)
+Show DNS setup:
+A @ → VPS IP
+A * → VPS IP
+Verify DNS before enabling feature
+Step 2: Auto domain generation
+Generate Domain CLick subdomain:
+app-abc123.yourdomain.com
+Step 3: Container binding
+Assign subdomain to specific container
+Allow:
+Edit domain
+Regenerate domain
+Step 4: Nginx auto config
+Backend writes config to shared volume
+Auto reload nginx
+Domain routes to container
+🔹 4. Backup System (S3 Required) 💾
+Condition:
+If S3 storage not configured:
+
+Show message:
+
+“Please configure S3 Storage to enable backups”
+
+Create Backup
+Container → “Backups” → “Create Backup”
+
+Fields:
+
+Destination (S3 bucket)
+Schedule:
+Predefined (every minute, daily, etc.)
+Custom cron
+Prefix path (optional)
+Keep latest N backups
+Enable / Disable
+Cron Backup Execution
+Automatically run backup on schedule
+Create archive from container data
+Upload to S3 bucket
+Logs Example:
+Initializing backup
+[Fri May 1 05:22:45 UTC 2026] Starting backup process...
+[Fri May 1 05:22:45 UTC 2026] Executing backup command...
+[Fri May 1 05:22:45 UTC 2026] Container Up: 22bb17a1fe3a
+[Fri May 1 05:22:46 UTC 2026] ✅ backup completed successfully
+[Fri May 1 05:22:46 UTC 2026] Starting upload to S3...
+[Fri May 1 05:22:47 UTC 2026] ✅ Upload to S3 completed successfully
+Backup done ✅
+🔹 5. Restore System ♻️
+Select backup from S3 bucket
+Restore into container
+Features:
+Restore specific backup
+Overwrite existing data
+Manual restore trigger
+🔹 6. Backup Scheduler UI
+Show all backup jobs
+Actions:
+Edit
+Delete
+Enable / Disable
+Run manually
+Show logs per job
+🎯 Goal
+
+Create a full-featured container management system with:
+
+Secure env variable management
+Per-container cron scheduler
+Auto domain generation & routing
+S3-based backup & restore system
+Production-ready architecture similar to Dokploy / Coolify

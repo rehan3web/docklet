@@ -807,3 +807,120 @@ export async function storageUploadFile(bucket: string, file: File, key: string,
     xhr.send(fd);
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONTAINER MANAGEMENT — Env Vars, Scheduler, Domain, Backup
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const mgmt = (path: string, opts?: RequestInit) => apiFetch(`/mgmt${path}`, opts);
+const j = (body: any) => ({ body: JSON.stringify(body) });
+
+// ── Env Vars ──────────────────────────────────────────────────────────────────
+export type ContainerEnvVar = { id: number; container_name: string; key: string; created_at: number };
+
+export function useGetContainerEnv(name: string) {
+  return useQuery({
+    queryKey: ["container-env", name],
+    queryFn: () => mgmt(`/containers/${encodeURIComponent(name)}/env`) as Promise<{ vars: ContainerEnvVar[] }>,
+    enabled: !!name,
+  });
+}
+export const containerEnvSet = (name: string, key: string, value: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/env`, { method: "POST", ...j({ key, value }) });
+export const containerEnvDelete = (name: string, id: number) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/env/${id}`, { method: "DELETE" });
+export const containerEnvApply = (name: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/env/apply`, { method: "POST" });
+
+// ── Container Scheduler ───────────────────────────────────────────────────────
+export type ContainerSchedule = {
+  id: number; container_name: string; label: string; cron_expr: string;
+  command: string; enabled: boolean; last_run: number | null; created_at: number;
+};
+export type ContainerScheduleLog = {
+  id: number; schedule_id: number; started_at: number; finished_at: number | null;
+  status: string; output: string;
+};
+
+export function useGetContainerSchedules(name: string) {
+  return useQuery({
+    queryKey: ["container-schedules", name],
+    queryFn: () => mgmt(`/containers/${encodeURIComponent(name)}/schedules`) as Promise<{ schedules: ContainerSchedule[] }>,
+    enabled: !!name,
+  });
+}
+export const containerScheduleCreate = (name: string, data: Partial<ContainerSchedule>) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/schedules`, { method: "POST", ...j(data) });
+export const containerScheduleUpdate = (name: string, id: number, data: Partial<ContainerSchedule>) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/schedules/${id}`, { method: "PATCH", ...j(data) });
+export const containerScheduleDelete = (name: string, id: number) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/schedules/${id}`, { method: "DELETE" });
+export const containerScheduleRun = (name: string, id: number) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/schedules/${id}/run`, { method: "POST" });
+export const containerScheduleLogs = (name: string, id: number) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/schedules/${id}/logs`) as Promise<{ logs: ContainerScheduleLog[] }>;
+
+// ── Base Domain ───────────────────────────────────────────────────────────────
+export type BaseDomainConfig = { id: number; domain: string; verified: boolean; vps_ip: string; created_at: number };
+
+export function useGetBaseDomain() {
+  return useQuery({
+    queryKey: ["base-domain"],
+    queryFn: () => mgmt('/base-domain') as Promise<{ config: BaseDomainConfig | null }>,
+    staleTime: 30000,
+  });
+}
+export const baseDomainSave = (domain: string, vps_ip: string) =>
+  mgmt('/base-domain', { method: "POST", ...j({ domain, vps_ip }) });
+export const baseDomainVerify = () =>
+  mgmt('/base-domain/verify', { method: "POST" }) as Promise<{ verified: boolean; apexOk: boolean; wildcardOk: boolean; apexIps: string[]; wildcardIps: string[]; vps_ip: string }>;
+
+// ── Container Domain ──────────────────────────────────────────────────────────
+export type ContainerDomain = {
+  id: number; container_name: string; subdomain: string; full_domain: string;
+  port: number; nginx_enabled: boolean; created_at: number;
+};
+
+export const containerDomainGet = (name: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/domain`) as Promise<{ domain: ContainerDomain | null; baseDomain: BaseDomainConfig | null }>;
+export const containerDomainAssign = (name: string, port: number, subdomain?: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/domain`, { method: "POST", ...j({ port, subdomain }) });
+export const containerDomainNginx = (name: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/domain/nginx`, { method: "POST" });
+export const containerDomainDelete = (name: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/domain`, { method: "DELETE" });
+export const containerDomainRegenerate = (name: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/domain/regenerate`, { method: "POST" });
+
+// ── Backups ───────────────────────────────────────────────────────────────────
+export type ContainerBackup = {
+  id: number; container_name: string; label: string; cron_expr: string | null;
+  s3_bucket: string; prefix: string; keep_n: number; enabled: boolean; created_at: number;
+};
+export type ContainerBackupLog = {
+  id: number; backup_id: number; started_at: number; finished_at: number | null;
+  status: string; output: string; s3_key: string | null;
+};
+export type S3BackupFile = { key: string; size: number; lastModified: string };
+
+export function useGetContainerBackups(name: string) {
+  return useQuery({
+    queryKey: ["container-backups", name],
+    queryFn: () => mgmt(`/containers/${encodeURIComponent(name)}/backups`) as Promise<{ backups: ContainerBackup[] }>,
+    enabled: !!name,
+  });
+}
+export const containerBackupCreate = (name: string, data: Partial<ContainerBackup>) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/backups`, { method: "POST", ...j(data) });
+export const containerBackupUpdate = (name: string, id: number, data: Partial<ContainerBackup>) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/backups/${id}`, { method: "PATCH", ...j(data) });
+export const containerBackupDelete = (name: string, id: number) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/backups/${id}`, { method: "DELETE" });
+export const containerBackupRun = (name: string, id: number) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/backups/${id}/run`, { method: "POST" });
+export const containerBackupLogs = (name: string, id: number) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/backups/${id}/logs`) as Promise<{ logs: ContainerBackupLog[] }>;
+export const containerBackupS3Files = (name: string, id: number) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/backups/${id}/s3-files`) as Promise<{ files: S3BackupFile[] }>;
+export const containerRestore = (name: string, s3_bucket: string, s3_key: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/restore`, { method: "POST", ...j({ s3_bucket, s3_key }) });

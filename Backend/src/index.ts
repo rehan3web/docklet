@@ -15,6 +15,7 @@ import deployRoutes from './routes/deploy';
 import proxyRoutes from './routes/proxy';
 import schedulerRoutes from './routes/scheduler';
 import storageRoutes from './routes/storage';
+import containerMgmtRoutes, { initContainerManagement } from './routes/containerManagement';
 import { registerSshSocketHandlers } from './routes/ssh';
 import { registerDockerExecSocketHandlers } from './routes/docker';
 import { setIo } from './lib/socket';
@@ -51,6 +52,7 @@ app.use('/api/deploy', deployRoutes);
 app.use('/api/proxy', proxyRoutes);
 app.use('/api/scheduler', schedulerRoutes);
 app.use('/api/storage', storageRoutes);
+app.use('/api/mgmt', containerMgmtRoutes);
 
 // ── Socket.IO JWT handshake middleware ────────────────────────────────────────
 // Reject any socket that does not present a valid bearer token. Authenticated
@@ -115,4 +117,5 @@ const PORT = process.env.BACKEND_PORT || 3001;
 server.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Backend running on port ${PORT}`);
     initScheduler();
+    initContainerManagement().catch(err => console.error('[ContainerMgmt] Init failed:', err.message));
 });
