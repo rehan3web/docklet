@@ -24,6 +24,14 @@ import { initScheduler } from './lib/schedulerService';
 
 dotenv.config();
 
+// ── Global crash guards ────────────────────────────────────────────────────────
+process.on('uncaughtException', (err) => {
+    console.error('[FATAL] Uncaught exception — keeping process alive:', err.message);
+});
+process.on('unhandledRejection', (reason: any) => {
+    console.error('[FATAL] Unhandled promise rejection — keeping process alive:', reason?.message ?? reason);
+});
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {

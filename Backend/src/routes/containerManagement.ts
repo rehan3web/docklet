@@ -497,19 +497,22 @@ router.post('/containers/:name/env/apply', async (req, res) => {
         const merged = { ...existingEnv, ...envMap };
         const envArr = Object.entries(merged).map(([k, v]) => `${k}=${v}`);
 
-        // Stop and remove
-        try { await containerObj.stop(); } catch { /* already stopped */ }
-        await containerObj.remove();
+        // Stop (5s grace), force-remove, brief pause, recreate
+        try { await containerObj.stop({ t: 5 } as any); } catch { /* already stopped */ }
+        try { await containerObj.remove({ force: true } as any); } catch { /* best-effort */ }
+        await new Promise(r => setTimeout(r, 800));
 
-        // Recreate
+        // Recreate with sanitised HostConfig (removes AutoRemove, read-only fields)
         const newContainer = await docker.createContainer({
             name,
             Image: cfg.Image,
-            Cmd: cfg.Cmd || undefined,
-            Entrypoint: cfg.Entrypoint || undefined,
+            Cmd: cfg.Cmd?.length ? cfg.Cmd : undefined,
+            Entrypoint: cfg.Entrypoint?.length ? cfg.Entrypoint : undefined,
             Env: envArr,
             ExposedPorts: cfg.ExposedPorts || {},
-            HostConfig: hostCfg,
+            WorkingDir: cfg.WorkingDir || undefined,
+            User: cfg.User || undefined,
+            HostConfig: sanitiseHostConfig(hostCfg),
             Labels: cfg.Labels || {},
         });
         await newContainer.start();
@@ -716,6 +719,27 @@ router.post('/containers/:name/domain/nginx', async (req, res) => {
 });
 
 // ── Traefik integration ────────────────────────────────────────────────────────
+// Sanitise HostConfig from docker inspect before passing to createContainer.
+// The raw inspect result contains read-only / runtime-computed fields that the
+// Docker API rejects, and AutoRemove:true would immediately delete our new container.
+function sanitiseHostConfig(raw: any): any {
+    const safe: any = {};
+    const pick = [
+        'Binds', 'PortBindings', 'NetworkMode', 'RestartPolicy',
+        'Privileged', 'CapAdd', 'CapDrop', 'Devices', 'DeviceCgroupRules',
+        'Memory', 'MemorySwap', 'NanoCpus', 'CpuShares', 'CpusetCpus',
+        'PidMode', 'IpcMode', 'UTSMode', 'UsernsMode',
+        'ShmSize', 'Sysctls', 'ExtraHosts', 'Ulimits', 'GroupAdd',
+        'SecurityOpt', 'ReadonlyRootfs', 'Tmpfs', 'Isolation',
+        'LogConfig', 'VolumeDriver', 'VolumesFrom', 'Links',
+    ];
+    for (const key of pick) {
+        if (raw[key] !== undefined && raw[key] !== null) safe[key] = raw[key];
+    }
+    safe.AutoRemove = false; // CRITICAL: never auto-remove our recreated container
+    return safe;
+}
+
 router.post('/containers/:name/domain/traefik', async (req, res) => {
     const { name } = req.params;
     try {
@@ -731,7 +755,7 @@ router.post('/containers/:name/domain/traefik', async (req, res) => {
         const containerObj = docker.getContainer(found.Id);
         const info = await containerObj.inspect();
 
-        // Build Traefik labels
+        // Build Traefik labels (merge into existing, don't clobber compose labels)
         const safeName = name.replace(/[^a-zA-Z0-9]/g, '-');
         const traefikLabels: Record<string, string> = {
             'traefik.enable': 'true',
@@ -742,25 +766,45 @@ router.post('/containers/:name/domain/traefik', async (req, res) => {
         };
         const mergedLabels = { ...(info.Config.Labels ?? {}), ...traefikLabels };
 
-        // Remove 'traefik.enable=false' if present from older assignment
-        delete mergedLabels['traefik.disable'];
+        console.log(`[Traefik] Recreating container "${name}" with labels…`);
 
-        // Stop + remove + recreate with new labels
-        try { await containerObj.stop(); } catch { /* already stopped */ }
-        await containerObj.remove();
+        // Stop with a short timeout so we don't hang the request
+        try {
+            await containerObj.stop({ t: 5 } as any);
+        } catch (e: any) {
+            // "not running" is fine — continue
+            if (!e.message?.includes('not running') && e.statusCode !== 304) {
+                console.warn(`[Traefik] stop warning: ${e.message}`);
+            }
+        }
+
+        // Force-remove so we don't get "container still stopping" errors
+        try {
+            await containerObj.remove({ force: true } as any);
+        } catch (e: any) {
+            console.warn(`[Traefik] remove warning: ${e.message}`);
+        }
+
+        // Brief pause — Docker needs a moment to release the container name
+        await new Promise(r => setTimeout(r, 800));
+
         const newContainer = await docker.createContainer({
             name,
             Image: info.Config.Image,
-            Cmd: info.Config.Cmd || undefined,
-            Entrypoint: info.Config.Entrypoint || undefined,
+            Cmd: info.Config.Cmd?.length ? info.Config.Cmd : undefined,
+            Entrypoint: info.Config.Entrypoint?.length ? info.Config.Entrypoint : undefined,
             Env: info.Config.Env || [],
             ExposedPorts: info.Config.ExposedPorts || {},
-            HostConfig: info.HostConfig,
+            WorkingDir: info.Config.WorkingDir || undefined,
+            User: info.Config.User || undefined,
+            HostConfig: sanitiseHostConfig(info.HostConfig),
             Labels: mergedLabels,
         });
         await newContainer.start();
 
-        // Remove old nginx config if any
+        console.log(`[Traefik] Container "${name}" recreated and started.`);
+
+        // Clean up old nginx config if any
         const confPath = path.join(NGINX_CONF_DIR, `container-${name}.conf`);
         try { await fs.promises.unlink(confPath); } catch { /* not present */ }
 
@@ -769,6 +813,7 @@ router.post('/containers/:name/domain/traefik', async (req, res) => {
         );
         res.json({ ok: true, fullDomain: dom.full_domain, labels: traefikLabels });
     } catch (err: any) {
+        console.error(`[Traefik] Error recreating "${name}":`, err.message);
         res.status(500).json({ message: err.message });
     }
 });

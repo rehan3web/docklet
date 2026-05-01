@@ -1,0 +1,39 @@
+ailed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers/6fed635885e265c94f63326a823d2dd3f64b22aae895d3b7f3b06ec20639fd20/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers/4b92f6a25cd1a835f273aac02c4950970902f81d8466345f11f7c5052008dccb/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers/6fed635885e265c94f63326a823d2dd3f64b22aae895d3b7f3b06ec20639fd20/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers/778502d2f6bd1012adab1ead6376a1dc4cba38d14652a6d8764198b6899e72fb/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers/589cad099050ea5166326c0103b71427290c32901786e72545e080f73bdaf0ed/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers/353e247aaec70765c0fc4090cf82a00a9509e10865f67ac34e7d40c2d108ccbf/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers/6e421155691481b0529647335d4b7cdef93207c2ef93059ec26c8140c0ed55dd/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers/57e9e6a536fa4941ec2049ab0814978494501bc165ce3f45a0ce7a0b65ef75d2/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers/397656a14a3f3b926a31fbab1110639120399f221be15108b46fa46d90138dee/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/mgmt/containers/docklet-client/domain/traefik:1  Failed to load resource: net::ERR_EMPTY_RESPONSEUnderstand this error
+api/docker/containers/778502d2f6bd1012adab1ead6376a1dc4cba38d14652a6d8764198b6899e72fb/stats:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+api/docker/containers:1  Failed to load resource: net::ERR_CONNECTION_REFUSEDUnderstand this error
+index-3_96dtiR.js:548  GET http://159.223.207.144:3000/api/docker/containers/917aada10efd60c47dedbb910d5c9969a8c72e786ad4cd476d4262629774e7ad/stats net::ERR_CONNECTION_REFUSED
+de @ index-3_96dtiR.js:548
+XZ @ index-3_96dtiR.js:548
+h @ index-3_96dtiR.js:851Understand this error
+index-3_96dtiR.js:548  GET http://159.223.207.144:3000/api/docker/containers net::ERR_CONNECTION_RESET
+de @ index-3_96dtiR.js:548
+queryFn @ index-3_96dtiR.js:548
+a @ index-3_96dtiR.js:48
+g @ index-3_96dtiR.js:48
+start @ index-3_96dtiR.js:48
+fetch @ index-3_96dtiR.js:48
+Hd @ index-3_96dtiR.js:48
+(anonymous) @ index-3_96dtiR.js:48
+setInterval
+setInterval @ index-3_96dtiR.js:48
+setInterval @ index-3_96dtiR.js:48
+Jw @ index-3_96dtiR.js:48
+e1 @ index-3_96dtiR.js:48
+onQueryUpdate @ index-3_96dtiR.js:48
+(anonymous) @ index-3_96dtiR.js:48
+(anonymous) @ index-3_96dtiR.js:48
+batch @ index-3_96dtiR.js:48
+wa @ index-3_96dtiR.js:48
+setData @ index-3_96dtiR.js:48
+fetch @ index-3_96dtiR.js:48Understand this error
