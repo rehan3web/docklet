@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { Plus, Trash2, Play, Database, ChevronDown, ChevronRight, ToggleLeft, ToggleRight, Loader2, HardDrive, RotateCw, AlertTriangle } from "lucide-react";
 import { format } from "date-fns";
@@ -18,13 +18,13 @@ import {
 import { useIsStorageConfigured } from "@/api/client";
 
 const CRON_PRESETS = [
-  { label: "Manual only",    value: "manual" },
-  { label: "Every minute",   value: "* * * * *" },
-  { label: "Every hour",     value: "0 * * * *" },
-  { label: "Every 6 hours",  value: "0 */6 * * *" },
-  { label: "Daily midnight", value: "0 0 * * *" },
-  { label: "Weekly (Mon)",   value: "0 0 * * 1" },
-  { label: "Custom…",        value: "custom" },
+  { label: "Manual only",                         value: "manual" },
+  { label: "Every minute (* * * * *)",             value: "* * * * *" },
+  { label: "Every hour (0 * * * *)",               value: "0 * * * *" },
+  { label: "Every 6 hours (0 */6 * * *)",          value: "0 */6 * * *" },
+  { label: "Every day at midnight (0 0 * * *)",    value: "0 0 * * *" },
+  { label: "Weekly on Monday (0 0 * * 1)",         value: "0 0 * * 1" },
+  { label: "Custom…",                              value: "custom" },
 ];
 
 interface Props { containerName: string; open: boolean; onClose: () => void }
@@ -178,14 +178,23 @@ export default function BackupDialog({ containerName, open, onClose }: Props) {
                 <Input placeholder="Prefix (optional)" value={prefix} onChange={e => setPrefix(e.target.value)} className="h-8 text-xs w-36" />
               </div>
               <div className="flex gap-2 items-center">
-                <Select value={cronPreset} onValueChange={setCronPreset}>
-                  <SelectTrigger className="h-8 text-xs flex-1">
-                    <SelectValue placeholder="Schedule" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CRON_PRESETS.map(p => <SelectItem key={p.value} value={p.value} className="text-xs">{p.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-8 text-xs flex-1 justify-between font-normal font-mono">
+                      <span className={cronPreset ? "text-foreground" : "text-muted-foreground"}>
+                        {cronPreset ? (CRON_PRESETS.find(p => p.value === cronPreset)?.label ?? cronPreset) : "Schedule"}
+                      </span>
+                      <ChevronDown className="w-3 h-3 shrink-0 opacity-50 ml-1" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-72">
+                    {CRON_PRESETS.map(p => (
+                      <DropdownMenuItem key={p.value} className="text-xs font-mono" onClick={() => setCronPreset(p.value)}>
+                        {p.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 {isCustom && (
                   <Input placeholder="Cron expression" value={customCron} onChange={e => setCustomCron(e.target.value)} className="h-8 text-xs font-mono flex-1" />
                 )}
