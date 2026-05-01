@@ -85,8 +85,12 @@ function certDomainArgs(domain: string): string[] {
 }
 
 // ── Nginx templates ───────────────────────────────────────────────────────────
+// Upstream target: the host machine's IP so Docker containers (docklet-nginx)
+// can reach any port exposed by other containers or services on the host.
+// We use the actual VPS IP rather than `docklet-haproxy` (which is not always
+// running) or `localhost` (which resolves to the nginx container itself).
 
-function nginxHttp(domain: string, port: number): string {
+function nginxHttp(domain: string, port: number, serverIp: string): string {
     const names = serverNames(domain);
     return `# Managed by Docklet — do not edit manually
 server {
@@ -98,9 +102,7 @@ server {
     }
 
     location / {
-        resolver 127.0.0.11 valid=10s;
-        set $upstream http://docklet-haproxy:${port};
-        proxy_pass $upstream;
+        proxy_pass http://${serverIp}:${port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "";
@@ -114,7 +116,7 @@ server {
 `;
 }
 
-function nginxHttps(domain: string, port: number): string {
+function nginxHttps(domain: string, port: number, serverIp: string): string {
     const names = serverNames(domain);
     return `# Managed by Docklet — do not edit manually
 server {
@@ -143,9 +145,7 @@ server {
     ssl_session_timeout 1d;
 
     location / {
-        resolver 127.0.0.11 valid=10s;
-        set $upstream http://docklet-haproxy:${port};
-        proxy_pass $upstream;
+        proxy_pass http://${serverIp}:${port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "";
@@ -159,8 +159,12 @@ server {
 `;
 }
 
-function writeConfig(domain: string, port: number, ssl: boolean) {
-    fs.writeFileSync(path.join(NGINX_CONFIGS_DIR, `${domain}.conf`), ssl ? nginxHttps(domain, port) : nginxHttp(domain, port));
+async function writeConfig(domain: string, port: number, ssl: boolean): Promise<void> {
+    const serverIp = await getServerIp();
+    fs.writeFileSync(
+        path.join(NGINX_CONFIGS_DIR, `${domain}.conf`),
+        ssl ? nginxHttps(domain, port, serverIp) : nginxHttp(domain, port, serverIp)
+    );
 }
 
 function reloadNginx(): Promise<void> {
@@ -207,7 +211,7 @@ router.post('/create', authenticateToken, async (req, res) => {
              RETURNING *`,
             [domain.toLowerCase(), port]
         );
-        writeConfig(domain.toLowerCase(), port, false);
+        await writeConfig(domain.toLowerCase(), port, false);
         await reloadNginx();
         res.json({ domain: rows[0] });
     } catch (err: any) {
@@ -299,7 +303,7 @@ router.post('/ssl/:id', authenticateToken, async (req, res) => {
             if (!ok) { status('failed', 'Certbot exited with errors'); return; }
 
             log('\nWriting SSL nginx config...\n', 'system');
-            writeConfig(domain, port, true);
+            await writeConfig(domain, port, true);
             await reloadNginx();
             log('nginx reloaded.\n', 'system');
 
@@ -312,8 +316,18 @@ router.post('/ssl/:id', authenticateToken, async (req, res) => {
 });
 
 router.post('/reload', authenticateToken, async (_req, res) => {
-    await reloadNginx();
-    res.json({ ok: true });
+    try {
+        await ensureTable();
+        const pool = await getConnection();
+        const { rows } = await pool.query('SELECT * FROM docklet_proxy_domains');
+        for (const row of rows) {
+            await writeConfig(row.domain, row.target_port, row.ssl_enabled ?? false);
+        }
+        await reloadNginx();
+        res.json({ ok: true, rewritten: rows.length });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
 });
 
 router.delete('/:id', authenticateToken, async (req, res) => {
