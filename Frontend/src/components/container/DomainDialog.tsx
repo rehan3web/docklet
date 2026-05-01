@@ -1,3 +1,4 @@
+import { copyToClipboard } from "@/lib/utils";
 import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -142,7 +143,7 @@ export default function DomainDialog({ containerName, open, onClose }: Props) {
   }
 
   function copy(text: string) {
-    navigator.clipboard.writeText(text).then(() => toast.success("Copied!"));
+    copyToClipboard(text).then(() => toast.success("Copied!"));
   }
 
   return (

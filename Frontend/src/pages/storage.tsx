@@ -1,3 +1,4 @@
+import { copyToClipboard } from "@/lib/utils";
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { Sun, Moon, Database, Plus, Trash2, RefreshCw, Upload, Download, Pencil, Search, X, FolderOpen, Folder, FolderPlus, File, FileText, FileImage, FileCode, Archive, CheckSquare, Square, ChevronRight, ChevronDown, Loader2, Unplug, Link2, Container, Zap, CheckCircle2, Circle, Globe, Shield, ShieldCheck, Share2, Copy, ExternalLink, Timer, Lock, Unlock, Check, AlertCircle, Server, Home } from "lucide-react";
 import { format } from "date-fns";
@@ -319,7 +320,7 @@ function DomainPanel() {
     : domainInput;
 
   function copyText(text: string, key: string) {
-    navigator.clipboard.writeText(text);
+    copyToClipboard(text);
     setCopied(key);
     setTimeout(() => setCopied(""), 2000);
   }
@@ -575,7 +576,7 @@ function ShareDialog({ bucket, file, open, onClose, isPublic, domain, serverIP }
   useEffect(() => { if (!open) { setShareUrl(""); setExpiresAt(""); } }, [open]);
 
   function copyText(text: string, key: string) {
-    navigator.clipboard.writeText(text);
+    copyToClipboard(text);
     setCopied(key);
     setTimeout(() => setCopied(""), 2000);
   }

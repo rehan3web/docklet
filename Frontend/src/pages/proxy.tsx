@@ -1,3 +1,4 @@
+import { copyToClipboard } from "@/lib/utils";
 import React, { useEffect, useRef, useState } from "react";
 import { Globe, Shield, ShieldCheck, RefreshCw, Plus, Trash2, CheckCircle2, XCircle, Clock, Loader2, Sun, Moon, Copy, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -362,7 +363,7 @@ export default function ProxyPage() {
                           <div className="flex items-center gap-2 p-2 bg-muted/40 rounded text-xs font-mono">
                             <span className="text-muted-foreground">Server IP:</span>
                             <span className="text-foreground font-semibold">{serverIp}</span>
-                            <Button variant="ghost" size="icon" className="w-5 h-5 ml-auto text-muted-foreground" onClick={() => { navigator.clipboard.writeText(serverIp); toast.success("Copied!"); }}>
+                            <Button variant="ghost" size="icon" className="w-5 h-5 ml-auto text-muted-foreground" onClick={() => { copyToClipboard(serverIp); toast.success("Copied!"); }}>
                               <Copy className="w-3 h-3" />
                             </Button>
                           </div>

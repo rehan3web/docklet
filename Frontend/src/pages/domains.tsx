@@ -1,3 +1,4 @@
+import { copyToClipboard } from "@/lib/utils";
 import React, { useEffect, useState } from "react";
 import { Plus, Trash2, CheckCircle, XCircle, Loader2, RefreshCw, Globe, Copy, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -86,7 +87,7 @@ export default function DomainsPage() {
   }
 
   function copy(text: string) {
-    navigator.clipboard.writeText(text).then(() => toast.success("Copied!"));
+    copyToClipboard(text).then(() => toast.success("Copied!"));
   }
 
   return (

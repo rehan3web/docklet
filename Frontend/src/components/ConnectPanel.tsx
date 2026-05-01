@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { X, Copy, Check, ChevronLeft, Globe, Lock, AlertTriangle, Database, Box, Cable, CheckCircle2, ShieldOff } from "lucide-react";
 import { Link } from "wouter";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import { useGetConnectionConfig } from "@/api/client";
 
 type Method = "direct" | "framework" | "orm";
@@ -150,7 +150,7 @@ function CopyBtn({ text }: { text: string }) {
     return (
         <button
             onClick={() => {
-                navigator.clipboard.writeText(text);
+                copyToClipboard(text);
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1600);
             }}

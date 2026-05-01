@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import { Copy, Check, AlertTriangle, X } from "lucide-react";
 import { toast } from "sonner";
 import { Alert } from "@/components/ui/alert";
@@ -25,7 +25,7 @@ function ConnectionRow({ label, localStr, publicStr }: { label: string; localStr
     const activeStr = exposed ? publicStr : localStr;
 
     const handleCopy = () => {
-        navigator.clipboard.writeText(activeStr);
+        copyToClipboard(activeStr);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };

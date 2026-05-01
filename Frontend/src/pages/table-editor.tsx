@@ -9,7 +9,7 @@ import { AddColumnPanel } from "@/components/table-editor/AddColumnPanel";
 import { Sun, Moon, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import { useTheme } from "@/hooks/use-theme";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
@@ -165,7 +165,7 @@ function TableContent({ activeTable, onSchemaRefresh }: { activeTable: string; o
 
     const handleCopyRows = () => {
         const rows = selectedRows.size > 0 ? data.filter((_: any, i: number) => selectedRows.has(i)) : data;
-        navigator.clipboard.writeText(JSON.stringify(rows, null, 2));
+        copyToClipboard(JSON.stringify(rows, null, 2));
         toast.custom((t) => (<Alert variant="info" description={`JSON for ${rows.length} rows copied.`} onClose={() => toast.dismiss(t)} />));
     };
 

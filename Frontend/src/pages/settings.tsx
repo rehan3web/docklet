@@ -4,7 +4,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sun, Moon, Copy, Check, AlertTriangle, Globe, Lock, PauseCircle, PlayCircle, RefreshCw, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import { toast } from "sonner";
 import { Alert } from "@/components/ui/alert";
 import {
@@ -17,7 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 function CopyButton({ text }: { text: string }) {
     const [copied, setCopied] = useState(false);
     const handle = () => {
-        navigator.clipboard.writeText(text);
+        copyToClipboard(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };

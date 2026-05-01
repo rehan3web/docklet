@@ -1,3 +1,4 @@
+import { copyToClipboard } from "@/lib/utils";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { ArrowLeft, Sun, Moon, Github, Terminal, CheckCheck, Copy, ChevronRight } from "lucide-react";
@@ -62,7 +63,7 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
     const [copied, setCopied] = useState(false);
 
     const copy = async () => {
-        await navigator.clipboard.writeText(code);
+        await copyToClipboard(code);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };

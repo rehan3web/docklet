@@ -3,7 +3,7 @@ import Prism from "prismjs";
 import "prismjs/components/prism-sql";
 import { Play, Copy, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 
 // Prism theme styles for darkness (minimalist)
 const prismStyles = `
@@ -176,7 +176,7 @@ export function SqlCodeEditor({ onRun, initialValue = "", value: controlledValue
     };
 
     const handleCopy = () => {
-        navigator.clipboard.writeText(code);
+        copyToClipboard(code);
     };
 
     const handleReset = () => {
