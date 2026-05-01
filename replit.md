@@ -14,6 +14,10 @@ Nextbase is a self-hosted, full-stack PostgreSQL management tool — a lightweig
 - **VPS Management**: Live CPU/RAM/Storage/Load charts streamed via Socket.IO every 3s with 60-point rolling history
 - **AI Terminal**: Shell command runner with NVIDIA LLM integration (user-supplied API key, AES-GCM encrypted at rest), live WS-streamed output, command suggestions, dangerous-command safety guards requiring explicit "I CONFIRM" confirmation
 - **Docker Manager**: Container start/stop/restart/remove + bulk actions via dockerode (gracefully reports unavailable when Docker is not installed)
+- **Container Environment Variables**: Per-container env var storage (AES-256-CBC encrypted at rest), with "Apply & Restart" that reconstructs the container from docker inspect + merged env.
+- **Container Scheduler**: Per-container cron jobs (node-cron) that run commands via `docker exec`. Create/edit/delete/toggle, manual run, per-schedule log history.
+- **Container Domain Routing**: Base-domain DNS verification (A + wildcard), auto-generated subdomains (`app-<hex>.domain.com`), nginx config written to shared bind-mount volume, per-container routing.
+- **Container Backups**: Schedule-based or manual backup via `docker export` → gzip → S3/MinIO upload. Keep-N rotation, per-backup log history, S3 file browser, restore from S3 key. Requires storage (MinIO) to be configured.
 - **GitHub Auto Deploy**: Clone Git repo → detect Dockerfile → docker build → docker run; live deployment logs streamed per-user via Socket.IO
 - **Reverse Proxy Manager**: Map domain → target port (nginx config generated, written to `nginx-configs/`). DNS A-record verification via `dns.promises.resolve4`. Let's Encrypt SSL via certbot (`docker run --volumes-from dbofather-server certbot/certbot`). Status flow: Pending DNS → Verified → SSL Active. Nginx container (`nextbase-nginx`, `network_mode: host`) auto-reloaded after every change.
 
