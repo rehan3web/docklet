@@ -932,6 +932,8 @@ export const containerBackupS3Files = (name: string, id: number) =>
   mgmt(`/containers/${encodeURIComponent(name)}/backups/${id}/s3-files`) as Promise<{ files: S3BackupFile[] }>;
 export const containerRestore = (name: string, s3_bucket: string, s3_key: string) =>
   mgmt(`/containers/${encodeURIComponent(name)}/restore`, { method: "POST", ...j({ s3_bucket, s3_key }) });
+export const getContainerDbType = (name: string) =>
+  mgmt(`/containers/${encodeURIComponent(name)}/db-type`) as Promise<{ dbType: "postgres" | "mysql" | "mariadb" | "mongo" | null }>;
 
 // ── Container Stats ────────────────────────────────────────────────────────────
 export type ContainerStats = {

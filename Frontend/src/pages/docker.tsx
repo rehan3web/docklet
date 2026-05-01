@@ -23,6 +23,12 @@ import {
   dockerLogs, dockerInspect, getContainerStats,
   type DockerContainer, type ContainerStats,
 } from "@/api/client";
+
+const DB_IMAGES = ['postgres', 'postgre', 'mysql', 'mariadb', 'mongo'];
+function isDbContainer(image: string) {
+  const img = image.toLowerCase();
+  return DB_IMAGES.some(k => img.includes(k));
+}
 import { useQueryClient } from "@tanstack/react-query";
 import { getSocket } from "@/api/socket";
 
@@ -478,6 +484,10 @@ export default function DockerPage() {
   };
 
   function openDialog(container: DockerContainer, type: DialogType) {
+    if (type === "backup" && !isDbContainer(container.image)) {
+      toast.warning("Backups are only available for database containers (PostgreSQL, MySQL, MariaDB, MongoDB).", { duration: 4000 });
+      return;
+    }
     setActiveContainer(container);
     setActiveDialog(type);
   }

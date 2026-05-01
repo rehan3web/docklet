@@ -163,7 +163,7 @@ export default function BackupDialog({ containerName, open, onClose }: Props) {
             Backups — {containerName}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Create scheduled or manual backups. Archives are uploaded to S3/MinIO.
+            Native database dump (pg_dump / mysqldump / mongodump) — uploaded directly to S3/MinIO. No full-container export.
           </DialogDescription>
         </DialogHeader>
 

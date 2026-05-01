@@ -255,6 +255,26 @@ async function runContainerSchedule(scheduleId: number): Promise<number> {
     return logId;
 }
 
+// ── DB-type detection ─────────────────────────────────────────────────────────
+type DbType = 'postgres' | 'mysql' | 'mariadb' | 'mongo' | null;
+
+function detectDbType(image: string): DbType {
+    const img = image.toLowerCase();
+    if (img.includes('postgres') || img.includes('postgre')) return 'postgres';
+    if (img.includes('mariadb')) return 'mariadb';
+    if (img.includes('mysql')) return 'mysql';
+    if (img.includes('mongo')) return 'mongo';
+    return null;
+}
+
+async function getContainerDbType(name: string): Promise<{ dbType: DbType; id: string } | null> {
+    const docker = getDocker();
+    const containers = await docker.listContainers({ all: true });
+    const found = containers.find(c => c.Names.some(n => n.replace(/^\//, '') === name));
+    if (!found) return null;
+    return { dbType: detectDbType(found.Image), id: found.Id };
+}
+
 // ── Backup runner ─────────────────────────────────────────────────────────────
 const backupCronJobs = new Map<number, ReturnType<typeof cron.schedule>>();
 
@@ -308,55 +328,77 @@ async function runBackup(backupId: number): Promise<number> {
         );
     };
 
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const prefix = backup.prefix ? `${backup.prefix}/` : '';
-    const s3Key = `${prefix}${backup.container_name}/${ts}.tar.gz`;
-
     try {
         await appendLog(`[${new Date().toUTCString()}] Starting backup process...`);
-        await appendLog(`[${new Date().toUTCString()}] Executing backup command...`);
 
-        // Get container ID
+        // Resolve container and detect DB type
         const docker = getDocker();
-        let container;
-        try {
-            const containers = await docker.listContainers({ all: true });
-            const found = containers.find(c =>
-                c.Names.some(n => n.replace(/^\//, '') === backup.container_name)
-            );
-            if (!found) throw new Error(`Container '${backup.container_name}' not found`);
-            container = docker.getContainer(found.Id);
-            await appendLog(`[${new Date().toUTCString()}] Container Up: ${found.Id.slice(0, 12)}`);
-        } catch (err: any) {
-            throw new Error(`Container error: ${err.message}`);
+        const containers = await docker.listContainers({ all: true });
+        const found = containers.find(c =>
+            c.Names.some(n => n.replace(/^\//, '') === backup.container_name)
+        );
+        if (!found) throw new Error(`Container '${backup.container_name}' not found`);
+        const dbType = detectDbType(found.Image);
+        if (!dbType) throw new Error(`Container '${backup.container_name}' is not a database container (image: ${found.Image}). Only PostgreSQL, MySQL, MariaDB, and MongoDB containers can be backed up.`);
+
+        await appendLog(`[${new Date().toUTCString()}] Detected DB type: ${dbType} (${found.Id.slice(0, 12)})`);
+
+        // Build dump command
+        let dumpArgs: string[];
+        let ext: string;
+        if (dbType === 'postgres') {
+            dumpArgs = ['exec', found.Id, 'pg_dump', '-U', 'postgres', '--format=custom', '--no-password'];
+            ext = 'pgdump';
+        } else if (dbType === 'mysql') {
+            dumpArgs = ['exec', found.Id, 'mysqldump', '-u', 'root', '--all-databases', '--single-transaction', '--quick'];
+            ext = 'sql';
+        } else if (dbType === 'mariadb') {
+            dumpArgs = ['exec', found.Id, 'mariadb-dump', '-u', 'root', '--all-databases', '--single-transaction', '--quick'];
+            ext = 'sql';
+        } else {
+            dumpArgs = ['exec', found.Id, 'mongodump', '--archive'];
+            ext = 'archive';
         }
 
-        // Stream export → S3
-        const { client, cfg } = await getS3Client();
-        const exportStream = await container.export();
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const prefix = backup.prefix ? `${backup.prefix}/` : '';
+        const s3Key = `${prefix}${backup.container_name}/${ts}.${ext}.gz`;
 
-        const { pipeline } = await import('stream');
+        await appendLog(`[${new Date().toUTCString()}] Running dump command...`);
+
+        const { client } = await getS3Client();
         const zlib = await import('zlib');
-        const { promisify } = await import('util');
-        const pipelineAsync = promisify(pipeline);
 
-        const gzip = zlib.createGzip();
-        const gzipStream = (exportStream as any).pipe(gzip);
+        await new Promise<void>((resolve, reject) => {
+            const child = spawn('docker', dumpArgs);
+            const gzip = zlib.createGzip();
+            child.stdout.pipe(gzip);
 
-        const upload = new Upload({
-            client,
-            params: {
-                Bucket: backup.s3_bucket,
-                Key: s3Key,
-                Body: gzipStream,
-                ContentType: 'application/gzip',
-            },
+            const upload = new Upload({
+                client,
+                params: {
+                    Bucket: backup.s3_bucket,
+                    Key: s3Key,
+                    Body: gzip,
+                    ContentType: 'application/gzip',
+                },
+            });
+
+            const stderrBuf: string[] = [];
+            child.stderr.on('data', (d: Buffer) => stderrBuf.push(d.toString()));
+            child.on('error', reject);
+            child.on('close', async (code: number) => {
+                if (code !== 0) {
+                    reject(new Error(`Dump process exited with code ${code}: ${stderrBuf.join('').slice(0, 300)}`));
+                } else {
+                    try { await upload.done(); resolve(); }
+                    catch (e) { reject(e); }
+                }
+            });
         });
 
-        await upload.done();
-        await appendLog(`[${new Date().toUTCString()}] ✅ backup completed successfully`);
-        await appendLog(`[${new Date().toUTCString()}] Starting upload to S3...`);
-        await appendLog(`[${new Date().toUTCString()}] ✅ Upload to S3 completed successfully`);
+        await appendLog(`[${new Date().toUTCString()}] ✅ Dump completed and uploaded to S3`);
+        await appendLog(`[${new Date().toUTCString()}] S3 key: ${s3Key}`);
         await appendLog(`Backup done ✅`);
 
         // Prune old backups
@@ -917,6 +959,17 @@ router.post('/containers/:name/domain/regenerate', async (req, res) => {
     const confPath = path.join(NGINX_CONF_DIR, `container-${name}.conf`);
     try { await fs.promises.unlink(confPath); } catch { /* already gone */ }
     res.json({ domain: updated[0] });
+});
+
+// GET /containers/:name/db-type — detect if container runs a supported DB
+router.get('/containers/:name/db-type', async (req, res) => {
+    try {
+        const result = await getContainerDbType(req.params.name);
+        if (!result) return res.status(404).json({ dbType: null, message: 'Container not found' });
+        res.json({ dbType: result.dbType });
+    } catch (err: any) {
+        res.status(500).json({ dbType: null, message: err.message });
+    }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
