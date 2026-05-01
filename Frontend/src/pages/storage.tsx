@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { Sun, Moon, Database, Plus, Trash2, RefreshCw, Upload, Download, Pencil, Search, X, FolderOpen, File, FileText, FileImage, FileCode, Archive, CheckSquare, Square, ChevronRight, Loader2, Unplug, Link2, Container, Zap, CheckCircle2, Circle, Globe, Shield, ShieldCheck, Share2, Copy, ExternalLink, Timer, Lock, Unlock, Check, AlertCircle, Server } from "lucide-react";
+import { Sun, Moon, Database, Plus, Trash2, RefreshCw, Upload, Download, Pencil, Search, X, FolderOpen, Folder, FolderPlus, File, FileText, FileImage, FileCode, Archive, CheckSquare, Square, ChevronRight, ChevronDown, Loader2, Unplug, Link2, Container, Zap, CheckCircle2, Circle, Globe, Shield, ShieldCheck, Share2, Copy, ExternalLink, Timer, Lock, Unlock, Check, AlertCircle, Server, Home } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -684,9 +684,10 @@ function ShareDialog({ bucket, file, open, onClose, isPublic, domain, serverIP }
 // ── Upload Zone ───────────────────────────────────────────────────────────────
 interface UploadState { file: File; progress: number; done: boolean; error?: string }
 
-function UploadDialog({ bucket, open, onClose, onDone }: { bucket: string; open: boolean; onClose: () => void; onDone: () => void }) {
+function UploadDialog({ bucket, prefix = "", open, onClose, onDone }: { bucket: string; prefix?: string; open: boolean; onClose: () => void; onDone: () => void }) {
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function addFiles(files: FileList | File[]) {
@@ -701,10 +702,12 @@ function UploadDialog({ bucket, open, onClose, onDone }: { bucket: string; open:
   }
 
   async function startUpload() {
+    setUploading(true);
     for (let i = 0; i < uploads.length; i++) {
       if (uploads[i].done) continue;
       try {
-        await storageUploadFile(bucket, uploads[i].file, uploads[i].file.name, (pct) => {
+        const key = prefix + uploads[i].file.name;
+        await storageUploadFile(bucket, uploads[i].file, key, (pct) => {
           setUploads(prev => prev.map((u, j) => j === i ? { ...u, progress: pct } : u));
         });
         setUploads(prev => prev.map((u, j) => j === i ? { ...u, progress: 100, done: true } : u));
@@ -717,12 +720,18 @@ function UploadDialog({ bucket, open, onClose, onDone }: { bucket: string; open:
 
   const allDone = uploads.length > 0 && uploads.every(u => u.done || !!u.error);
 
+  function handleClose() {
+    setUploads([]);
+    setUploading(false);
+    onClose();
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { setUploads([]); onClose(); } }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="text-sm font-medium flex items-center gap-2">
-            <Upload className="w-4 h-4 text-muted-foreground" /> Upload Files — {bucket}
+            <Upload className="w-4 h-4 text-muted-foreground" /> Upload Files — {bucket}{prefix ? `/${prefix.replace(/\/$/, "")}` : ""}
           </DialogTitle>
         </DialogHeader>
         <div
@@ -737,23 +746,29 @@ function UploadDialog({ bucket, open, onClose, onDone }: { bucket: string; open:
           <p className="text-xs text-muted-foreground/60 mt-1">Max 200 MB per file</p>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={e => { if (e.target.files) addFiles(e.target.files); }} />
         </div>
+        {/* File list — always show so user can see what they selected */}
         {uploads.length > 0 && (
           <div className="space-y-2 max-h-48 overflow-y-auto">
             {uploads.map((u, i) => (
               <div key={i} className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="truncate max-w-[300px] text-foreground">{u.file.name}</span>
-                  <span className={u.error ? "text-destructive" : "text-muted-foreground"}>{u.error ? "Failed" : u.done ? "Done" : `${u.progress}%`}</span>
+                  <span className="truncate max-w-[340px] text-foreground">{u.file.name}</span>
+                  <span className={u.error ? "text-destructive" : u.done ? "text-emerald-500" : uploading ? "text-muted-foreground" : "text-muted-foreground/60"}>
+                    {u.error ? "Failed" : u.done ? "Done" : uploading ? `${u.progress}%` : fmtBytes(u.file.size)}
+                  </span>
                 </div>
-                <Progress value={u.progress} className={`h-1 ${u.error ? "[&>div]:bg-destructive" : ""}`} />
+                {/* Progress bar only visible after upload starts */}
+                {uploading && (
+                  <Progress value={u.progress} className={`h-1 ${u.error ? "[&>div]:bg-destructive" : u.done ? "[&>div]:bg-emerald-500" : ""}`} />
+                )}
               </div>
             ))}
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => { setUploads([]); onClose(); }}>Cancel</Button>
-          <Button size="sm" disabled={uploads.length === 0 || allDone} onClick={startUpload} className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
-            {allDone ? "Done" : "Upload"}
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleClose}>Cancel</Button>
+          <Button size="sm" disabled={uploads.length === 0 || uploading && !allDone} onClick={allDone ? handleClose : startUpload} className="h-8 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none">
+            {uploading && !allDone ? <><Loader2 className="w-3 h-3 animate-spin mr-1.5" />Uploading…</> : allDone ? "Done" : "Upload"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -827,6 +842,10 @@ export default function StoragePage() {
   const [policyLoading, setPolicyLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [currentFolder, setCurrentFolder] = useState<string>("");
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
 
   const { data: filesData, isLoading: filesLoading, refetch: refetchFiles } = useGetStorageFiles(selectedBucket);
 
@@ -933,13 +952,71 @@ export default function StoragePage() {
     } catch (err: any) { toast.error(err.message); }
   }
 
-  const files = (filesData?.files || []).filter(f => !search || f.key.toLowerCase().includes(search.toLowerCase()));
+  async function handleCreateFolder(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newFolderName.trim() || !selectedBucket) return;
+    setCreatingFolder(true);
+    try {
+      const placeholder = new File([""], ".keep", { type: "application/octet-stream" });
+      await storageUploadFile(selectedBucket, placeholder, `${currentFolder}${newFolderName.trim()}/.keep`);
+      toast.success(`Folder "${newFolderName.trim()}" created`);
+      setNewFolderName("");
+      setShowCreateFolder(false);
+      refetchFiles();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create folder");
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
+
+  function navigateFolder(prefix: string) {
+    setCurrentFolder(prefix);
+    setSelected(new Set());
+    setSearch("");
+  }
+
+  // ── Virtual folder tree from flat file list ──────────────────────────────
+  const allFiles = filesData?.files || [];
+  const prefixedFiles = currentFolder
+    ? allFiles.filter(f => f.key.startsWith(currentFolder))
+    : allFiles;
+
+  const seenFolders = new Set<string>();
+  const virtualFolders: { name: string; prefix: string }[] = [];
+  const currentLevelFiles: StorageFile[] = [];
+
+  for (const f of prefixedFiles) {
+    const relKey = currentFolder ? f.key.slice(currentFolder.length) : f.key;
+    if (!relKey) continue;
+    const slashIdx = relKey.indexOf("/");
+    if (slashIdx !== -1) {
+      const folderName = relKey.slice(0, slashIdx);
+      if (folderName && !seenFolders.has(folderName)) {
+        seenFolders.add(folderName);
+        virtualFolders.push({ name: folderName, prefix: currentFolder + folderName + "/" });
+      }
+    } else {
+      currentLevelFiles.push(f);
+    }
+  }
+
+  // Filter .keep placeholder files
+  const visibleFiles = currentLevelFiles.filter(f => {
+    const name = f.key.split("/").pop() || f.key;
+    return name !== ".keep" && (!search || name.toLowerCase().includes(search.toLowerCase()));
+  });
+  const filteredFolders = virtualFolders.filter(d => !search || d.name.toLowerCase().includes(search.toLowerCase()));
+
+  // Breadcrumb segments
+  const pathSegments = currentFolder ? currentFolder.slice(0, -1).split("/") : [];
+
   const buckets = bucketsData?.buckets || [];
 
-  const allSelected = files.length > 0 && files.every(f => selected.has(f.key));
+  const allSelected = visibleFiles.length > 0 && visibleFiles.every(f => selected.has(f.key));
   function toggleAll() {
     if (allSelected) setSelected(new Set());
-    else setSelected(new Set(files.map(f => f.key)));
+    else setSelected(new Set(visibleFiles.map(f => f.key)));
   }
   function toggleFile(key: string) {
     setSelected(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
@@ -1095,7 +1172,7 @@ export default function StoragePage() {
                   ) : buckets.map(b => (
                     <button
                       key={b.name}
-                      onClick={() => { setSelectedBucket(b.name); setSelected(new Set()); setSearch(""); }}
+                      onClick={() => { setSelectedBucket(b.name); setSelected(new Set()); setSearch(""); setCurrentFolder(""); }}
                       className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border transition-all whitespace-nowrap ${
                         selectedBucket === b.name
                           ? "bg-muted text-foreground border-border font-medium"
@@ -1127,7 +1204,7 @@ export default function StoragePage() {
                       <div
                         key={b.name}
                         className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all ${selectedBucket === b.name ? "bg-muted text-foreground border border-border" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground border border-transparent"}`}
-                        onClick={() => { setSelectedBucket(b.name); setSelected(new Set()); setSearch(""); }}
+                        onClick={() => { setSelectedBucket(b.name); setSelected(new Set()); setSearch(""); setCurrentFolder(""); }}
                       >
                         <FolderOpen className="w-3.5 h-3.5 shrink-0" />
                         <span className="text-xs font-medium truncate flex-1">{b.name}</span>
@@ -1163,13 +1240,26 @@ export default function StoragePage() {
                     {/* Toolbar */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2 border-b border-border bg-muted/20">
                       {/* Breadcrumb */}
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Database className="w-3.5 h-3.5" />
-                        <ChevronRight className="w-3 h-3" />
-                        <span className="text-foreground font-medium">{selectedBucket}</span>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground flex-wrap">
+                        <button onClick={() => navigateFolder("")} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                          <Database className="w-3.5 h-3.5" />
+                          <span className={currentFolder ? "hover:underline" : "text-foreground font-medium"}>{selectedBucket}</span>
+                        </button>
+                        {pathSegments.map((seg, i) => {
+                          const segPrefix = pathSegments.slice(0, i + 1).join("/") + "/";
+                          const isLast = i === pathSegments.length - 1;
+                          return (
+                            <React.Fragment key={segPrefix}>
+                              <ChevronRight className="w-3 h-3 shrink-0" />
+                              <button onClick={() => navigateFolder(segPrefix)} className={`hover:text-foreground transition-colors ${isLast ? "text-foreground font-medium" : "hover:underline"}`}>
+                                {seg}
+                              </button>
+                            </React.Fragment>
+                          );
+                        })}
                       </div>
 
-                      {/* Buttons — push right on desktop, stay inline on mobile */}
+                      {/* Buttons — push right */}
                       <div className="flex items-center gap-1 ml-auto">
                         {selectedBucketIsPublic !== null && !policyLoading && (
                           <button onClick={handleTogglePolicy} title={selectedBucketIsPublic ? "Bucket is public — click to make private" : "Bucket is private — click to make public"}
@@ -1183,6 +1273,9 @@ export default function StoragePage() {
                             <Trash2 className="w-3.5 h-3.5 mr-1" /><span className="hidden sm:inline">Delete</span> ({selected.size})
                           </Button>
                         )}
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => { setNewFolderName(""); setShowCreateFolder(v => !v); }}>
+                          <FolderPlus className="w-3.5 h-3.5 md:mr-1" /><span className="hidden md:inline">New Folder</span>
+                        </Button>
                         <Button size="sm" className="h-7 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none" onClick={() => setShowUpload(true)}>
                           <Upload className="w-3.5 h-3.5 md:mr-1" /><span className="hidden md:inline">Upload</span>
                         </Button>
@@ -1192,13 +1285,31 @@ export default function StoragePage() {
                       <div className="relative w-full md:w-auto md:flex-1 md:max-w-xs order-last md:order-none">
                         <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <Input
-                          placeholder="Filter files…"
+                          placeholder="Filter…"
                           value={search}
                           onChange={e => setSearch(e.target.value)}
                           className="h-7 text-xs pl-8 pr-7 bg-background w-full"
                         />
                         {search && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setSearch("")}><X className="w-3 h-3" /></button>}
                       </div>
+
+                      {/* Create Folder inline form */}
+                      {showCreateFolder && (
+                        <form onSubmit={handleCreateFolder} className="w-full flex items-center gap-2 pt-1 border-t border-border mt-1">
+                          <FolderPlus className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                          <Input
+                            autoFocus
+                            placeholder="Folder name…"
+                            value={newFolderName}
+                            onChange={e => setNewFolderName(e.target.value)}
+                            className="h-7 text-xs flex-1"
+                          />
+                          <Button type="submit" size="sm" disabled={creatingFolder || !newFolderName.trim()} className="h-7 text-xs border border-black/10 dark:border-white/10 bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] shadow-none shrink-0">
+                            {creatingFolder ? <Loader2 className="w-3 h-3 animate-spin" /> : "Create"}
+                          </Button>
+                          <button type="button" onClick={() => setShowCreateFolder(false)} className="text-muted-foreground hover:text-foreground shrink-0"><X className="w-3.5 h-3.5" /></button>
+                        </form>
+                      )}
                     </div>
 
                     {/* File table */}
@@ -1228,46 +1339,73 @@ export default function StoragePage() {
                                 <td className="px-4 py-3"></td>
                               </tr>
                             ))
-                          ) : files.length === 0 ? (
+                          ) : filteredFolders.length === 0 && visibleFiles.length === 0 ? (
                             <tr>
                               <td colSpan={5} className="py-16 text-center text-muted-foreground">
-                                {search ? "No files match your filter" : "This bucket is empty — upload some files"}
+                                {search ? "No items match your filter" : "This folder is empty — upload some files or create a folder"}
                               </td>
                             </tr>
                           ) : (
-                            files.map(f => (
-                              <tr key={f.key} className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${selected.has(f.key) ? "bg-primary/5" : ""}`}>
-                                <td className="px-4 py-2.5">
-                                  <button onClick={() => toggleFile(f.key)} className="text-muted-foreground hover:text-foreground">
-                                    {selected.has(f.key) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}
-                                  </button>
-                                </td>
-                                <td className="px-2 py-2.5">
-                                  <div className="flex items-center gap-2">
-                                    {fileIcon(f.key)}
-                                    <span className="font-mono text-foreground truncate max-w-xs" title={f.key}>{f.key}</span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{fmtBytes(f.size)}</td>
-                                <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{format(new Date(f.lastModified), "MMM dd, HH:mm")}</td>
-                                <td className="px-4 py-2.5 text-right">
-                                  <div className="flex items-center justify-end gap-0.5">
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Share" onClick={() => setShareFile(f)}>
-                                      <Share2 className="w-3.5 h-3.5" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Download" onClick={() => handleDownload(f)}>
-                                      <Download className="w-3.5 h-3.5" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Rename" onClick={() => setRenameFile(f)}>
-                                      <Pencil className="w-3.5 h-3.5" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" title="Delete" onClick={() => setDeleteFiles([f.key])}>
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </Button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))
+                            <>
+                              {/* Folders first */}
+                              {filteredFolders.map(d => (
+                                <tr key={d.prefix} className="border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer" onClick={() => navigateFolder(d.prefix)}>
+                                  <td className="px-4 py-2.5">
+                                    <span className="text-muted-foreground/40"><Square className="w-4 h-4" /></span>
+                                  </td>
+                                  <td className="px-2 py-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <FolderOpen className="w-4 h-4 text-amber-400 shrink-0" />
+                                      <span className="font-medium text-foreground">{d.name}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right text-muted-foreground/50 text-xs">—</td>
+                                  <td className="px-4 py-2.5 text-muted-foreground/50 hidden md:table-cell text-xs">Folder</td>
+                                  <td className="px-4 py-2.5 text-right">
+                                    <div className="flex items-center justify-end gap-0.5">
+                                      <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* Files */}
+                              {visibleFiles.map(f => {
+                                const name = f.key.split("/").pop() || f.key;
+                                return (
+                                  <tr key={f.key} className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${selected.has(f.key) ? "bg-primary/5" : ""}`}>
+                                    <td className="px-4 py-2.5">
+                                      <button onClick={() => toggleFile(f.key)} className="text-muted-foreground hover:text-foreground">
+                                        {selected.has(f.key) ? <CheckSquare className="w-4 h-4 text-primary" /> : <Square className="w-4 h-4" />}
+                                      </button>
+                                    </td>
+                                    <td className="px-2 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        {fileIcon(f.key)}
+                                        <span className="font-mono text-foreground truncate max-w-xs" title={f.key}>{name}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{fmtBytes(f.size)}</td>
+                                    <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{format(new Date(f.lastModified), "MMM dd, HH:mm")}</td>
+                                    <td className="px-4 py-2.5 text-right">
+                                      <div className="flex items-center justify-end gap-0.5">
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Share" onClick={() => setShareFile(f)}>
+                                          <Share2 className="w-3.5 h-3.5" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Download" onClick={() => handleDownload(f)}>
+                                          <Download className="w-3.5 h-3.5" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Rename" onClick={() => setRenameFile(f)}>
+                                          <Pencil className="w-3.5 h-3.5" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" title="Delete" onClick={() => setDeleteFiles([f.key])}>
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </Button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </>
                           )}
                         </tbody>
                       </table>
@@ -1276,11 +1414,14 @@ export default function StoragePage() {
                     {/* Footer */}
                     <div className="border-t border-border px-4 py-2 flex items-center justify-between bg-muted/10">
                       <span className="text-xs text-muted-foreground">
-                        {files.length} file{files.length !== 1 ? "s" : ""}{selected.size > 0 ? ` · ${selected.size} selected` : ""}
+                        {filteredFolders.length > 0 && `${filteredFolders.length} folder${filteredFolders.length !== 1 ? "s" : ""}`}
+                        {filteredFolders.length > 0 && visibleFiles.length > 0 && " · "}
+                        {visibleFiles.length > 0 && `${visibleFiles.length} file${visibleFiles.length !== 1 ? "s" : ""}`}
+                        {selected.size > 0 ? ` · ${selected.size} selected` : ""}
                       </span>
-                      {files.length > 0 && (
+                      {visibleFiles.length > 0 && (
                         <span className="text-xs text-muted-foreground">
-                          {fmtBytes(files.reduce((a, f) => a + f.size, 0))} total
+                          {fmtBytes(visibleFiles.reduce((a, f) => a + f.size, 0))} total
                         </span>
                       )}
                     </div>
@@ -1319,6 +1460,7 @@ export default function StoragePage() {
       {selectedBucket && (
         <UploadDialog
           bucket={selectedBucket}
+          prefix={currentFolder}
           open={showUpload}
           onClose={() => setShowUpload(false)}
           onDone={() => { qc.invalidateQueries({ queryKey: ["storage-files"] }); refetchFiles(); }}
