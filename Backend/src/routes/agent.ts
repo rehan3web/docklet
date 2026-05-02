@@ -40,13 +40,31 @@ function isDockerAvailable(): boolean {
 async function getDomainContext(): Promise<string> {
     try {
         const db = await getConnection();
-        const rows = await db.query(
+
+        // Proxy domains (with port mapping, verification, SSL status)
+        const proxy = await db.query(
             `SELECT domain, target_port, verified, ssl_enabled FROM docklet_proxy_domains ORDER BY created_at DESC LIMIT 20`
         );
-        if (!rows.rows.length) return 'No proxy domains configured.';
-        return 'Configured proxy domains:\n' + rows.rows.map((r: any) =>
-            `  - ${r.domain} → port ${r.target_port} | verified: ${r.verified} | ssl: ${r.ssl_enabled}`
-        ).join('\n');
+
+        // Verified base domains (wildcard DNS coverage)
+        let baseDomains: string[] = [];
+        try {
+            const base = await db.query(
+                `SELECT domain, vps_ip FROM verified_domains WHERE verified = TRUE ORDER BY created_at DESC LIMIT 20`
+            );
+            baseDomains = base.rows.map((r: any) => `  - ${r.domain} (IP: ${r.vps_ip}) — wildcard DNS covers *.${r.domain}`);
+        } catch { /* table may not exist yet */ }
+
+        const parts: string[] = [];
+        if (baseDomains.length) {
+            parts.push('Verified base domains (wildcard A * record — ALL subdomains resolve automatically):\n' + baseDomains.join('\n'));
+        }
+        if (proxy.rows.length) {
+            parts.push('Configured proxy entries:\n' + proxy.rows.map((r: any) =>
+                `  - ${r.domain} → port ${r.target_port} | verified: ${r.verified} | ssl: ${r.ssl_enabled}`
+            ).join('\n'));
+        }
+        return parts.length ? parts.join('\n\n') : 'No domains configured.';
     } catch { return 'Could not fetch domain list (DB unavailable).'; }
 }
 
@@ -173,7 +191,8 @@ type AgentStep =
     | { type: 'docker_remove';  container: string; description: string; continueOnError?: boolean }
     | { type: 'docker_logs';    container: string; description: string }
     | { type: 'docker_free_port'; port: number; description: string }
-    | { type: 'proxy_enable_ssl'; domain: string; description: string };
+    | { type: 'proxy_enable_ssl';    domain: string; description: string }
+    | { type: 'proxy_create_domain'; domain: string; targetPort: number; description: string };
 
 type ActionPlan = {
     requiresDocker: boolean;
@@ -213,12 +232,23 @@ ENVIRONMENT CONSTRAINTS (this host is a shared/containerized Linux environment):
 - If a previous attempt failed with "not allowed", "operation not permitted", or "invalid argument" for a flag, OMIT that flag entirely — do not retry it.
 
 DOMAIN & SSL AUTOMATION:
-- You will receive a DOMAIN CONTEXT list showing each domain, its target port, whether it is verified (DNS A record points to this server), and whether SSL is already enabled.
-- If the user asks to "connect a domain" or "enable SSL" for a domain:
-  1. Check the domain context. If the domain does NOT exist or verified=false → output a single "message" step telling the user: "Please go to Domain, click Add Domain, and verify it first before SSL can be enabled." Do NOT proceed further.
-  2. If verified=true and ssl_enabled=false → use "proxy_enable_ssl" step to issue an SSL certificate via Let's Encrypt and reload Nginx automatically.
-  3. If ssl_enabled=true → output a "message" step saying SSL is already active and provide the https:// URL.
-- The nginx container name is "docklet-nginx". The certbot webroot path is /var/www/certbot. Letsencrypt volume is "letsencrypt".
+- You receive a DOMAIN CONTEXT with two sections:
+  A) "Verified base domains" — base domains whose wildcard A record (* → IP) is confirmed. Every subdomain of these automatically resolves — no extra DNS step needed.
+  B) "Configured proxy entries" — domains/subdomains already registered in the reverse proxy.
+
+- WILDCARD RULE: If the user asks to connect "sub.base.tld" and "base.tld" appears in section A (wildcard verified), then "sub.base.tld" is ALREADY resolvable. Do NOT tell the user to go verify DNS. Proceed directly.
+
+- Decision tree for domain/SSL requests:
+  1. Check section B. If the exact domain IS already in the proxy:
+     - verified=true, ssl_enabled=false → "proxy_enable_ssl" step only.
+     - ssl_enabled=true → "message" step: SSL already active, URL is https://<domain>.
+  2. If the domain is NOT in section B but its parent base domain IS in section A (wildcard):
+     - Use "proxy_create_domain" to register the subdomain in the proxy (this writes the nginx config and DB entry).
+     - Then use "proxy_enable_ssl" to issue the certificate.
+     - Output the final https:// URL.
+  3. If neither condition is met → "message" step: "Please go to Domain, click Add Domain, and verify it first."
+- To find the target port for a container: look it up in the LIVE DOCKER CONTEXT (the host port in the ports column).
+- The nginx container name is "docklet-nginx".
 
 STEP TYPES:
 - "message": { "content": "..." }
@@ -231,6 +261,7 @@ STEP TYPES:
 - "docker_free_port": { "port": 27017, "description": "..." }
 - "docker_logs": { "container": "name", "description": "..." }
 - "shell": { "command": "single-command-no-operators", "description": "...", "continueOnError": false }
+- "proxy_create_domain": { "domain": "client.example.com", "targetPort": 3000, "description": "Register subdomain in reverse proxy" }
 - "proxy_enable_ssl": { "domain": "example.com", "description": "Issue SSL certificate via Let's Encrypt" }
 
 Respond ONLY with valid JSON — no markdown fences, no extra text:
@@ -540,6 +571,53 @@ async function executeSteps(
             if (res.exitCode !== 0) {
                 err(`Shell command failed (exit ${res.exitCode})`);
                 if (!step.continueOnError) return { failed: true, log: logLines.join('\n') };
+            }
+            continue;
+        }
+
+        if (step.type === 'proxy_create_domain') {
+            cmd(`Registering ${step.domain} → port ${step.targetPort} in reverse proxy`);
+            try {
+                const fs   = require('fs');
+                const path = require('path');
+                const db   = await getConnection();
+                const serverIp = await getAgentServerIp();
+                const domain   = step.domain.toLowerCase();
+                const port     = step.targetPort;
+                const names    = isRootDomain(domain) ? `${domain} www.${domain}` : domain;
+                const httpConf = `# Managed by Docklet Agent
+server {
+    listen 80;
+    server_name ${names};
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / {
+        proxy_pass http://${serverIp}:${port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+`;
+                if (!fs.existsSync(NGINX_CONFIGS_DIR_AGENT)) fs.mkdirSync(NGINX_CONFIGS_DIR_AGENT, { recursive: true });
+                fs.writeFileSync(path.join(NGINX_CONFIGS_DIR_AGENT, `${domain}.conf`), httpConf);
+                await db.query(
+                    `INSERT INTO docklet_proxy_domains (domain, target_port, verified)
+                     VALUES ($1, $2, TRUE)
+                     ON CONFLICT (domain) DO UPDATE SET target_port = $2, verified = TRUE, updated_at = NOW()`,
+                    [domain, port]
+                );
+                await new Promise<void>((resolve) => {
+                    const child = spawn('docker', ['exec', NGINX_CONTAINER_AGENT, 'nginx', '-s', 'reload']);
+                    child.on('close', () => resolve()); child.on('error', () => resolve());
+                });
+                ok(`Proxy entry created: ${domain} → port ${port}`);
+            } catch (e: any) {
+                err(`Failed to create proxy entry: ${e.message}`);
+                return { failed: true, log: logLines.join('\n') };
             }
             continue;
         }
