@@ -289,6 +289,7 @@ Your job: determine if the task genuinely succeeded (service running, healthy, a
 
 Rules:
 - A container being "Up" is not enough — check if the service is actually working.
+- EXCEPTION: If the original request is purely to CHECK or REPORT status/health (e.g. "check health", "what is the status", "is it running", "show me the logs"), then a container showing "Up" in docker ps IS sufficient to set ok=true. Do not demand an HTTP curl for pure status-check requests.
 - If fixSteps are needed, make them precise. Use "wait" before retrying health checks.
 - MongoDB 7+: use "mongosh" not "mongo".
 - NEVER make unnecessary changes — only fix what is actually broken.
@@ -672,36 +673,56 @@ function extractDomain(msg: string): string | null {
     return domains.length ? domains[0].toLowerCase() : null;
 }
 
+/** Stopwords to ignore when scanning message for container name tokens. */
+const CONTAINER_HINT_STOPWORDS = new Set([
+    'connect','route','map','point','attach','link','assign','add','enable','ssl','https',
+    'domain','subdomain','into','inot','in','to','for','the','a','an','and','or','of',
+    'container','service','docker','docklet','my','its','with','please','check','health',
+    'status','running','start','stop','restart','remove','delete','deploy','create',
+]);
+
 /**
- * Extracts the target container name or keyword from the message.
- * Returns null if not recognisable.
+ * Extracts meaningful words from the message (excluding domain parts and stopwords)
+ * that could be part of a container name.
  */
-function extractContainerHint(msg: string): string | null {
-    // "into <name>" / "to <name>" / "for <name>" / "container <name>"
-    const m = msg.match(/(?:into|to|for|container|service)\s+([\w\-]+)/i);
-    return m ? m[1].toLowerCase() : null;
+function extractContainerWords(msg: string, domainToExclude?: string): string[] {
+    const domainParts = new Set((domainToExclude ?? '').toLowerCase().split('.').filter(Boolean));
+    return msg.toLowerCase()
+        .replace(/[^a-z0-9\s\-]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 2 && !CONTAINER_HINT_STOPWORDS.has(w) && !domainParts.has(w));
 }
 
 /**
- * Gets the host port for a running container by name (partial match).
- * Returns null if not found.
+ * Parses host port from docker ps Ports field.
  */
-function getContainerHostPort(containerHint: string): number | null {
+function parseHostPort(ports: string): number | null {
+    const pm = ports?.match(/(?:0\.0\.0\.0|:::):(\d+)->/);
+    return pm ? parseInt(pm[1], 10) : null;
+}
+
+/**
+ * Gets the host port for a running container by best-match against hint words.
+ * Returns null if no container matches.
+ */
+function getContainerHostPort(hintWords: string[]): number | null {
     try {
         const out = execSync(
             `docker ps --format "{{.Names}}|{{.Ports}}" --filter "status=running"`,
             { stdio: 'pipe', timeout: 5_000 }
         ).toString().trim();
+        let best: { port: number; score: number } | null = null;
         for (const line of out.split('\n').filter(Boolean)) {
             const [name, ports] = line.split('|');
-            if (!name.toLowerCase().includes(containerHint)) continue;
-            // e.g. "0.0.0.0:3000->80/tcp" — take the first public host port
-            const pm = ports?.match(/0\.0\.0\.0:(\d+)->/);
-            if (pm) return parseInt(pm[1], 10);
-            // Also try ":::3000->80/tcp"
-            const pm2 = ports?.match(/:::(\d+)->/);
-            if (pm2) return parseInt(pm2[1], 10);
+            const nameLower = name.toLowerCase();
+            const nameParts = nameLower.split(/[\-_]+/);
+            // Score = number of hint words that appear as a substring of the container name
+            const score = hintWords.filter(w => nameParts.some(p => p.includes(w) || w.includes(p))).length;
+            if (score === 0) continue;
+            const port = parseHostPort(ports);
+            if (port && (!best || score > best.score)) best = { port, score };
         }
+        return best?.port ?? null;
     } catch { /* ignore */ }
     return null;
 }
@@ -787,11 +808,17 @@ async function tryDomainConnect(
     }
 
     // ── Wildcard covers this subdomain — find target port ─────────────────
-    const containerHint = extractContainerHint(message) ?? domain.split('.')[0];
-    let targetPort = getContainerHostPort(containerHint);
+    // Build hint word list from message (exclude domain parts, stopwords)
+    const hintWords = extractContainerWords(message, domain);
+    // Also add the subdomain label itself as a hint (e.g. "client" from "client.xrpflow.xyz")
+    const subLabel = domain.split('.')[0];
+    if (subLabel && !hintWords.includes(subLabel)) hintWords.push(subLabel);
+
+    const targetPort = getContainerHostPort(hintWords);
 
     if (!targetPort) {
-        emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Could not find a running container matching "${containerHint}". Make sure the container is running and try again.` });
+        const tried = hintWords.join(', ');
+        emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Could not find a running container matching [${tried}]. Make sure the container is running and try again.` });
         emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Container not found' });
         return true;
     }
