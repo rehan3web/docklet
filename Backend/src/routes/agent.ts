@@ -215,7 +215,7 @@ ENVIRONMENT CONSTRAINTS (this host is a shared/containerized Linux environment):
 DOMAIN & SSL AUTOMATION:
 - You will receive a DOMAIN CONTEXT list showing each domain, its target port, whether it is verified (DNS A record points to this server), and whether SSL is already enabled.
 - If the user asks to "connect a domain" or "enable SSL" for a domain:
-  1. Check the domain context. If the domain does NOT exist or verified=false → output a single "message" step telling the user to go to Settings > Reverse Proxy, add the domain, point DNS A record to this server's IP, then click Verify. Do NOT proceed further.
+  1. Check the domain context. If the domain does NOT exist or verified=false → output a single "message" step telling the user: "Please go to Domain, click Add Domain, and verify it first before SSL can be enabled." Do NOT proceed further.
   2. If verified=true and ssl_enabled=false → use "proxy_enable_ssl" step to issue an SSL certificate via Let's Encrypt and reload Nginx automatically.
   3. If ssl_enabled=true → output a "message" step saying SSL is already active and provide the https:// URL.
 - The nginx container name is "docklet-nginx". The certbot webroot path is /var/www/certbot. Letsencrypt volume is "letsencrypt".
