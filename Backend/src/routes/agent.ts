@@ -82,6 +82,17 @@ function getDockerContext(): string {
     } catch { return 'Unable to fetch container list.'; }
 }
 
+function getNginxContext(): string {
+    try {
+        const out = execSync(
+            'docker exec docklet-nginx ls /etc/nginx/conf.d/',
+            { stdio: 'pipe', timeout: 5_000 }
+        ).toString().trim();
+        if (!out) return 'Nginx conf.d is empty.';
+        return 'Nginx conf.d files: ' + out.split('\n').filter(Boolean).join(', ');
+    } catch { return 'Nginx context unavailable (nginx may not be running).'; }
+}
+
 // ── SSL helpers (mirrored from proxy.ts so agent can enable SSL inline) ───────
 
 const NGINX_CONFIGS_DIR_AGENT = require('path').join(process.cwd(), 'nginx-configs');
@@ -293,6 +304,13 @@ CRITICAL FIX RULES (read carefully before generating fixSteps):
 - If the SAME command failed in multiple prior attempts, do NOT retry it — use a different approach entirely.
 - Only generate fixSteps you are confident will succeed given the above constraints.
 
+PROXY/DOMAIN/SSL VERIFICATION RULES (very important):
+- The execution log will contain lines like "[ok] Proxy entry created: <domain> → port <N>" and "[ok] SSL enabled for <domain>". If BOTH of these appear in the log without subsequent errors, the domain is fully configured — set ok=true immediately.
+- The NGINX CONF.D FILES list shows which config files exist inside the nginx container. If "<domain>.conf" appears there, the nginx config was written successfully.
+- Do NOT conclude "domain not routed" based solely on docker ps output — docker ps cannot show nginx routing. Use the execution log and the nginx conf.d file list instead.
+- If the log shows "Proxy entry created" and the nginx conf.d list shows the domain's .conf file, the proxy IS configured correctly. Set ok=true.
+- NEVER generate fixSteps that repeat proxy_create_domain or proxy_enable_ssl if those already appear with "[ok]" in the execution log.
+
 Respond ONLY with valid JSON — no markdown, no extra text:
 {
   "ok": true,
@@ -342,10 +360,12 @@ async function evaluateWithAI(
     model: string
 ): Promise<EvalResult> {
     const context    = isDockerAvailable() ? getDockerContext() : 'Docker is not available.';
+    const nginxCtx   = getNginxContext();
     const userPrompt =
         `ORIGINAL REQUEST: ${originalRequest}\n\n` +
-        `EXECUTION LOG:\n${executionLog.slice(-6000)}\n\n` +   // cap log size
-        `CURRENT DOCKER STATE:\n${context}`;
+        `EXECUTION LOG:\n${executionLog.slice(-6000)}\n\n` +
+        `CURRENT DOCKER STATE:\n${context}\n\n` +
+        `NGINX CONF.D FILES:\n${nginxCtx}`;
 
     const res = await makeOpenAI(apiKey).chat.completions.create({
         model,
