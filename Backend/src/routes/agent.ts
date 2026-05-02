@@ -11,6 +11,10 @@ const NVIDIA_BASE_URL      = 'https://integrate.api.nvidia.com/v1';
 const NVIDIA_DEFAULT_MODEL = 'openai/gpt-oss-120b';
 const AI_CALL_DELAY_MS     = 1500;   // min gap between AI API calls
 const MAX_VERIFY_CYCLES    = 3;      // max Plan→Execute→Verify loops
+const MAX_WAIT_MS          = 30_000; // cap on any single "wait" step
+const MAX_STEPS_PER_PLAN   = 20;     // cap total steps per plan/fix
+const MAX_FIX_STEPS        = 15;     // cap fix steps from evaluation AI
+const LOOP_TIMEOUT_MS      = 10 * 60 * 1000; // 10-minute hard stop
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -255,6 +259,15 @@ async function executeSteps(
     agentId: string,
     prefix = ''
 ): Promise<ExecResult> {
+    // Hard cap — never run more than MAX_STEPS_PER_PLAN steps from AI output
+    const safeSteps = steps.slice(0, MAX_STEPS_PER_PLAN);
+    if (safeSteps.length < steps.length) {
+        emitToUser(userId, 'agent:log', {
+            agentId, type: 'info',
+            content: `Plan capped at ${MAX_STEPS_PER_PLAN} steps (AI returned ${steps.length}).`,
+        });
+    }
+    steps = safeSteps;
     const logLines: string[] = [];
 
     const log = (line: string) => { logLines.push(line); };
@@ -285,8 +298,9 @@ async function executeSteps(
         }
 
         if (step.type === 'wait') {
-            info(`Waiting ${step.ms}ms — ${step.description}`);
-            await sleep(step.ms);
+            const safeMs = Math.min(step.ms, MAX_WAIT_MS);
+            info(`Waiting ${safeMs}ms — ${step.description}`);
+            await sleep(safeMs);
             continue;
         }
 
@@ -405,19 +419,43 @@ async function runAgentLoop(
     apiKey: string,
     model: string
 ): Promise<void> {
+    const loopStart = Date.now();
+
+    // Guard: abort if the loop has been running too long (hard stop)
+    function timedOut(): boolean {
+        if (Date.now() - loopStart > LOOP_TIMEOUT_MS) {
+            emitToUser(userId, 'agent:log', {
+                agentId, type: 'error',
+                content: `Agent stopped: exceeded ${LOOP_TIMEOUT_MS / 60000} minute time limit.`,
+            });
+            return true;
+        }
+        return false;
+    }
+
     // ── Phase 1: Plan ──────────────────────────────────────────────────────
     emitToUser(userId, 'agent:log', {
         agentId, type: 'thinking',
         content: 'Planning your request…',
     });
-    const plan = await planWithAI(message, apiKey, model);
+
+    let plan: ActionPlan;
+    try {
+        plan = await planWithAI(message, apiKey, model);
+    } catch (e: any) {
+        emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Planning failed: ${e.message}` });
+        emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Planning failed' });
+        return;
+    }
+
     emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: plan.summary });
+
+    if (timedOut()) { emitToUser(userId, 'agent:done', { agentId, success: false, summary: plan.summary }); return; }
 
     // ── Phase 2: Execute initial plan ─────────────────────────────────────
     const execResult = await executeSteps(plan.steps, userId, agentId);
     let accumulatedLog = execResult.log;
 
-    // Hard failure in the plan itself — still verify so AI can see and fix it
     if (execResult.failed) {
         emitToUser(userId, 'agent:log', {
             agentId, type: 'info',
@@ -425,9 +463,14 @@ async function runAgentLoop(
         });
     }
 
-    // ── Phase 3: Verify → Fix loop ────────────────────────────────────────
+    if (timedOut()) { emitToUser(userId, 'agent:done', { agentId, success: false, summary: plan.summary }); return; }
+
+    // ── Phase 3: Verify → Fix loop (bounded: MAX_VERIFY_CYCLES iterations) ──
     for (let cycle = 1; cycle <= MAX_VERIFY_CYCLES; cycle++) {
-        // Mandatory delay before every AI call (avoids rate limits and unnecessary calls)
+
+        if (timedOut()) break;
+
+        // Mandatory 1500ms delay between every AI API call
         await sleep(AI_CALL_DELAY_MS);
 
         emitToUser(userId, 'agent:log', {
@@ -448,36 +491,39 @@ async function runAgentLoop(
         emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: evaluation.assessment });
 
         if (evaluation.ok) {
-            // ✅ All done
             emitToUser(userId, 'agent:done', { agentId, success: true, summary: plan.summary });
             return;
         }
 
-        // Not ok — do we have fix steps?
+        // No fix steps → nothing more AI can do
         if (!evaluation.fixSteps || evaluation.fixSteps.length === 0) {
             emitToUser(userId, 'agent:log', {
                 agentId, type: 'error',
-                content: 'Verification failed and AI has no fix steps. Stopping.',
+                content: 'Verification failed and AI provided no fix steps. Stopping.',
             });
             break;
         }
 
+        // Last cycle — don't apply fix, just report
         if (cycle === MAX_VERIFY_CYCLES) {
             emitToUser(userId, 'agent:log', {
                 agentId, type: 'error',
-                content: `Maximum fix attempts (${MAX_VERIFY_CYCLES}) reached.`,
+                content: `All ${MAX_VERIFY_CYCLES} fix attempts exhausted.`,
             });
             break;
         }
 
-        // Apply fix steps
+        if (timedOut()) break;
+
+        // Apply fix steps (capped at MAX_FIX_STEPS)
+        const safeFix = evaluation.fixSteps.slice(0, MAX_FIX_STEPS);
         emitToUser(userId, 'agent:log', {
             agentId, type: 'retry',
-            content: `Applying fix (attempt ${cycle}/${MAX_VERIFY_CYCLES})…`,
+            content: `Applying fix (attempt ${cycle}/${MAX_VERIFY_CYCLES - 1}) — ${safeFix.length} step(s)…`,
         });
 
-        const fixResult = await executeSteps(evaluation.fixSteps, userId, agentId);
-        accumulatedLog += '\n--- FIX ATTEMPT ' + cycle + ' ---\n' + fixResult.log;
+        const fixResult = await executeSteps(safeFix, userId, agentId);
+        accumulatedLog += `\n--- FIX ATTEMPT ${cycle} ---\n` + fixResult.log;
     }
 
     emitToUser(userId, 'agent:done', { agentId, success: false, summary: plan.summary });

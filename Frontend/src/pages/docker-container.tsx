@@ -16,6 +16,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { format } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import { copyToClipboard } from "@/lib/utils";
+import MarkdownContent from "@/components/MarkdownContent";
 import { getSocket } from "@/api/socket";
 import { Link } from "wouter";
 import {
@@ -458,19 +459,41 @@ function TerminalTab({ container }: { container: DockerContainer }) {
     setError(null);
     setConnected(false);
 
-    socket.emit("docker:exec:start", { containerId: container.id, rows: 40, cols: 120 });
-
     const onReady = () => { setConnected(true); inputRef.current?.focus(); };
     const onData = (data: string) => appendOutput(data);
     const onExit = () => { setConnected(false); appendOutput("\n[Process exited]"); };
     const onError = ({ message }: { message: string }) => { setError(message); setConnected(false); };
 
+    // Register ALL listeners BEFORE emitting start, so no event is missed
     socket.on("docker:exec:ready", onReady);
     socket.on("docker:exec:data", onData);
     socket.on("docker:exec:exit", onExit);
     socket.on("docker:exec:error", onError);
 
+    // Wait for connection if socket isn't ready yet
+    function startExec() {
+      socket.emit("docker:exec:start", { containerId: container.id, rows: 40, cols: 120 });
+    }
+    if (socket.connected) {
+      startExec();
+    } else {
+      socket.once("connect", startExec);
+    }
+
+    // Frontend timeout: if no ready/error within 15s, show a helpful message
+    const timeoutId = setTimeout(() => {
+      setError("Connection timed out. The container may not have a shell (/bin/sh or /bin/bash).");
+      setConnected(false);
+    }, 15_000);
+    const clearTimeout_ = () => clearTimeout(timeoutId);
+    socket.once("docker:exec:ready", clearTimeout_);
+    socket.once("docker:exec:error", clearTimeout_);
+
     return () => {
+      clearTimeout(timeoutId);
+      socket.off("connect", startExec);
+      socket.off("docker:exec:ready", clearTimeout_);
+      socket.off("docker:exec:error", clearTimeout_);
       socket.emit("docker:exec:stop");
       socket.off("docker:exec:ready", onReady);
       socket.off("docker:exec:data", onData);
@@ -1534,12 +1557,15 @@ function AiTab({ container }: { container: DockerContainer }) {
               }`}>
                 {msg.role === "user" ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
               </div>
-              <div className={`flex-1 max-w-[85%] rounded-xl px-3.5 py-2.5 text-xs leading-relaxed ${
+              <div className={`flex-1 max-w-[85%] rounded-xl px-3.5 py-2.5 ${
                 msg.role === "user"
                   ? "bg-primary text-primary-foreground ml-auto"
                   : "bg-muted/50 border border-border"
               }`}>
-                <pre className="whitespace-pre-wrap font-sans break-words">{msg.content}</pre>
+                {msg.role === "user"
+                  ? <p className="text-xs leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
+                  : <MarkdownContent content={msg.content} />
+                }
               </div>
             </div>
           ))}

@@ -19,6 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Sun, Moon } from "lucide-react";
 import { io as socketIo } from "socket.io-client";
 import { cn } from "@/lib/utils";
+import MarkdownContent from "@/components/MarkdownContent";
 
 const NVIDIA_MODELS = [
   { value: "openai/gpt-oss-120b",                label: "GPT-OSS 120B (Default)" },
@@ -633,12 +634,15 @@ export default function AiPage() {
                       {msg.role === "user" ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
                     </div>
                     <div className={cn(
-                      "flex-1 max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed",
+                      "flex-1 max-w-[85%] rounded-xl px-4 py-2.5",
                       msg.role === "user"
                         ? "bg-primary text-primary-foreground ml-auto"
                         : "bg-muted/50 border border-border"
                     )}>
-                      <pre className="whitespace-pre-wrap font-sans break-words">{msg.content}</pre>
+                      {msg.role === "user"
+                        ? <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
+                        : <MarkdownContent content={msg.content} />
+                      }
                     </div>
                   </div>
                 ))}

@@ -1,0 +1,98 @@
+chck health of this continer
+## Quick health check for **docklet‑minio**
+
+### 1️⃣ Docker‑level health (if a `HEALTHCHECK` is defined)
+
+```bash
+# Show the current health status reported by Docker
+docker inspect --format='{{json .State.Health}}' docklet-minio | jq .
+```
+
+Typical output:
+
+```json
+{
+  "Status": "healthy",
+  "FailingStreak": 0,
+  "Log": [
+    {
+      "Start": "2026-05-02T12:34:56.123456789Z",
+      "End": "2026-05-02T12:34:56.223456789Z",
+      "ExitCode": 0,
+      "Output": "ok"
+    }
+  ]
+}
+```
+
+If you see `"Status": "unhealthy"` or `"starting"`, the container’s health check is failing.
+
+---
+
+### 2️⃣ MinIO internal health endpoint
+
+MinIO ships a built‑in health API. Use `curl` (or any HTTP client) against the **ready** and **live** endpoints.
+
+```bash
+# Replace <host> with the IP/hostname where the container is reachable.
+# Default MinIO port is 9000 (adjust if you mapped a different host port).
+
+# Ready – checks that the server can serve traffic (storage, config, etc.)
+curl -s -o /dev/null -w "%{http_code}\n" http://<host>:9000/minio/health/ready
+# Live – only checks that the process is up
+curl -s -o /dev/null -w "%{http_code}\n" http://<host>:9000/minio/health/live
+```
+
+- `200` → healthy
+- Anything else (e.g., `503`, `500`) → problem.
+
+**Example** (running from the same host, using the container’s published port `9000`):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:9000/minio/health/ready
+# → 200
+```
+
+---
+
+### 3️⃣ Verify that the service is actually serving requests
+
+A tiny “list buckets” call will also confirm the server is functional (you’ll need MinIO credentials; the default access key/secret key are often set via environment variables).
+
+```bash
+# Assuming you have MINIO_ROOT_USER and MINIO_ROOT_PASSWORD exported
+export MC_HOST_minio="http://$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD@localhost:9000"
+mc admin info minio
+```
+
+If `mc` (MinIO client) returns bucket info without error, the server is up.
+
+---
+
+### 4️⃣ Combine everything in a one‑liner script
+
+```bash
+#!/usr/bin/env bash
+CONTAINER=docklet-minio
+HOST=localhost   # change if you published to another host/port
+PORT=9000
+
+# Docker health
+docker inspect --format='{{.State.Health.Status}}' $CONTAINER
+
+# MinIO ready & live endpoints
+for ep in ready live; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" http://$HOST:$PORT/minio/health/$ep)
+  echo "MinIO $ep → HTTP $code"
+done
+```
+
+Running the script will output something like:
+
+```
+healthy
+MinIO ready → HTTP 200
+MinIO live → HTTP 200
+```
+
+If any of the checks return a non‑200 or “unhealthy”, investigate the container logs (`docker logs docklet-minio`) and the host’s Docker daemon logs for the root cause.
