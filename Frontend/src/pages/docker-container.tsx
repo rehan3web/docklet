@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, Play, Square, RotateCw, Trash2, Loader2, Network, HardDrive, Terminal, KeyRound, Clock, Globe, RefreshCw, FileText, Rocket, Cpu, MemoryStick, Container, Sun, Moon, AlertTriangle, CheckCircle, XCircle, Copy, Code2, ChevronDown, ChevronUp, ShieldCheck, ExternalLink, Plus, EyeOff, History, ChevronRight, ToggleLeft, ToggleRight, Save, RotateCcw, Database, Zap, ChevronLeft } from "lucide-react";
+import { ArrowLeft, Play, Square, RotateCw, Trash2, Loader2, Network, HardDrive, Terminal, KeyRound, Clock, Globe, RefreshCw, FileText, Rocket, Cpu, MemoryStick, Container, Sun, Moon, AlertTriangle, CheckCircle, XCircle, Copy, Code2, ChevronDown, ChevronUp, ShieldCheck, ExternalLink, Plus, EyeOff, History, ChevronRight, ToggleLeft, ToggleRight, Save, RotateCcw, Database, Zap, ChevronLeft, Sparkles, Bot, User, Send, Info, TriangleAlert, CircleCheck, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,7 +28,8 @@ import {
   useGetBaseDomain, baseDomainSave, useGetVerifiedDomains,
   useGetContainerBackups, containerBackupCreate, containerBackupUpdate, containerBackupDelete, containerBackupRun, containerBackupLogs, containerBackupS3Files, containerRestore,
   useIsStorageConfigured,
-  type DockerContainer, type ContainerEnvVar, type EnvVersion, type ContainerSchedule, type ContainerScheduleLog, type ContainerDomain, type VerifiedDomain, type ContainerBackup, type ContainerBackupLog, type S3BackupFile,
+  useGetAiSettings, aiAnalyzeLogs, aiChat,
+  type DockerContainer, type ContainerEnvVar, type EnvVersion, type ContainerSchedule, type ContainerScheduleLog, type ContainerDomain, type VerifiedDomain, type ContainerBackup, type ContainerBackupLog, type S3BackupFile, type AiAnalysis,
 } from "@/api/client";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -59,6 +60,7 @@ const TABS = [
   { id: "schedule",    label: "Schedule",    icon: Clock },
   { id: "domain",      label: "Domain",      icon: Globe },
   { id: "backup",      label: "Backup",      icon: HardDrive },
+  { id: "ai",          label: "AI",          icon: Sparkles },
 ];
 
 // ── Action Tab ────────────────────────────────────────────────────────────────
@@ -72,6 +74,8 @@ function ActionTab({ container, onRefresh }: { container: DockerContainer; onRef
   const [logs, setLogs] = useState("");
   const [logsLoading, setLogsLoading] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
+  const [aiSummary, setAiSummary] = useState<AiAnalysis | null>(null);
+  const [aiSummarizing, setAiSummarizing] = useState(false);
 
   async function act(fn: () => Promise<void>, label: string) {
     setBusy(label);
@@ -99,8 +103,27 @@ function ActionTab({ container, onRefresh }: { container: DockerContainer; onRef
   async function openLogs() {
     setLogsOpen(true);
     setLogsLoading(true);
+    setAiSummary(null);
     setLogs("");
     dockerLogs(container.id).then(r => setLogs(r.logs || "(no logs)")).catch(e => setLogs(`Error: ${e.message}`)).finally(() => setLogsLoading(false));
+  }
+
+  async function handleAiSummarizeLogs() {
+    if (!logs || logsLoading) return;
+    setAiSummarizing(true);
+    try {
+      const result = await aiAnalyzeLogs({
+        logs,
+        containerName: (container.names[0] || container.shortId).replace(/^\//, ""),
+        containerState: container.state,
+        containerImage: container.image,
+      });
+      setAiSummary(result);
+    } catch (err: any) {
+      toast.error(err.message || "AI analysis failed");
+    } finally {
+      setAiSummarizing(false);
+    }
   }
 
   useEffect(() => {
@@ -221,18 +244,79 @@ function ActionTab({ container, onRefresh }: { container: DockerContainer; onRef
       </AlertDialog>
 
       {/* Logs dialog */}
-      <Dialog open={logsOpen} onOpenChange={o => { if (!o) setLogsOpen(false); }}>
-        <DialogContent className="sm:max-w-[760px] p-0 gap-0 overflow-hidden">
+      <Dialog open={logsOpen} onOpenChange={o => { if (!o) { setLogsOpen(false); setAiSummary(null); } }}>
+        <DialogContent className="sm:max-w-[800px] p-0 gap-0 overflow-hidden">
           <DialogHeader className="p-5 pb-3 border-b border-border">
-            <DialogTitle className="text-sm font-medium flex items-center gap-2"><FileText className="w-4 h-4 text-muted-foreground" />Logs — {container.names[0] || container.shortId}</DialogTitle>
-            <DialogDescription className="text-xs">Last 300 lines (stdout + stderr)</DialogDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="text-sm font-medium flex items-center gap-2"><FileText className="w-4 h-4 text-muted-foreground" />Logs — {container.names[0] || container.shortId}</DialogTitle>
+                <DialogDescription className="text-xs mt-0.5">Last 300 lines (stdout + stderr)</DialogDescription>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1.5 shrink-0"
+                onClick={handleAiSummarizeLogs}
+                disabled={logsLoading || aiSummarizing || !logs}
+              >
+                {aiSummarizing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-violet-500" />}
+                AI Summarize
+              </Button>
+            </div>
           </DialogHeader>
-          <div className="h-[480px] overflow-hidden bg-[#0d0d0d]">
+
+          {/* AI Summary Panel */}
+          {aiSummary && (
+            <div className="border-b border-border bg-muted/20 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-violet-500" />
+                <span className="text-xs font-semibold text-violet-600 dark:text-violet-400">AI Analysis</span>
+                <Badge className={`text-[10px] rounded-full px-2 py-0 ${
+                  aiSummary.health === "healthy" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" :
+                  aiSummary.health === "error" ? "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20" :
+                  aiSummary.health === "warning" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20" :
+                  "bg-muted text-muted-foreground border-border"
+                }`}>
+                  {aiSummary.health === "healthy" ? "✓ Healthy" : aiSummary.health === "error" ? "✗ Error" : aiSummary.health === "warning" ? "⚠ Warning" : "? Unknown"}
+                </Badge>
+                <span className="text-[10px] text-muted-foreground ml-auto font-mono">{aiSummary.model?.split("/").pop()}</span>
+              </div>
+              <p className="text-xs text-foreground leading-relaxed">{aiSummary.summary}</p>
+              {aiSummary.crashReason && (
+                <div className="flex gap-2 bg-red-500/5 border border-red-500/20 rounded-lg p-2.5">
+                  <TriangleAlert className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-600 dark:text-red-400">{aiSummary.crashReason}</p>
+                </div>
+              )}
+              {aiSummary.issues?.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Issues</p>
+                  {aiSummary.issues.map((issue, i) => (
+                    <div key={i} className="flex gap-2 text-xs text-foreground">
+                      <span className="text-amber-500 shrink-0">•</span>{issue}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {aiSummary.recommendations?.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Recommendations</p>
+                  {aiSummary.recommendations.map((rec, i) => (
+                    <div key={i} className="flex gap-2 text-xs text-foreground">
+                      <Lightbulb className="w-3 h-3 text-violet-500 shrink-0 mt-0.5" />{rec}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="h-[360px] overflow-hidden bg-[#0d0d0d]">
             {logsLoading ? <div className="h-full flex items-center justify-center gap-2 text-muted-foreground text-xs"><Loader2 className="w-4 h-4 animate-spin" />Loading logs…</div>
               : <pre ref={logRef} className="font-mono text-[11px] text-green-400 p-4 h-full overflow-y-auto whitespace-pre-wrap leading-relaxed">{logs}</pre>}
           </div>
           <div className="p-4 border-t border-border flex justify-end">
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setLogsOpen(false)}>Close</Button>
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => { setLogsOpen(false); setAiSummary(null); }}>Close</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -325,6 +409,42 @@ function TerminalTab({ container }: { container: DockerContainer }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const socket = getSocket();
 
+  // AI assist
+  const { data: aiSettings } = useGetAiSettings();
+  const aiConfigured = aiSettings?.configured ?? false;
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+
+  async function handleAiSuggest(e: React.FormEvent) {
+    e.preventDefault();
+    const prompt = aiPrompt.trim();
+    if (!prompt || aiLoading) return;
+    setAiLoading(true);
+    setAiSuggestion(null);
+    try {
+      const containerName = (container.names[0] || container.shortId).replace(/^\//, "");
+      const r = await aiChat(
+        [{ role: "user", content: prompt }],
+        `You are a Linux/Docker shell expert. The user is inside the container "${containerName}" (image: ${container.image}). ` +
+        `They describe a task in natural language. Respond ONLY with a single shell command. No explanation, no markdown fences, no commentary.`
+      );
+      setAiSuggestion(r.content.replace(/^```(?:bash|sh|shell)?\s*/i, "").replace(/```\s*$/i, "").trim());
+    } catch (err: any) {
+      toast.error(err.message || "AI failed");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  function useAiSuggestion() {
+    if (aiSuggestion) {
+      socket.emit("docker:exec:input", aiSuggestion + "\n");
+      setAiSuggestion(null);
+      setAiPrompt("");
+    }
+  }
+
   const appendOutput = useCallback((text: string) => {
     const cleaned = stripAnsi(text);
     setLines(prev => {
@@ -381,53 +501,100 @@ function TerminalTab({ container }: { container: DockerContainer }) {
   }
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden">
-      <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-4 h-4 text-muted-foreground" />
-          <span className="text-xs font-medium">Container Shell</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500" : "bg-muted-foreground"}`} />
-          <span className="text-[10px] text-muted-foreground">{connected ? "Connected" : error ? "Error" : "Connecting…"}</span>
-        </div>
-      </div>
-      <div
-        ref={outputRef}
-        className="h-[480px] overflow-y-auto bg-[#0d0d0d] p-4 font-mono text-[12px] text-green-400 leading-relaxed cursor-text"
-        onClick={() => inputRef.current?.focus()}
-      >
-        {lines.map((line, i) => <div key={i} className="whitespace-pre-wrap break-all">{line}</div>)}
-        {!connected && !error && (
-          <div className="flex items-center gap-2 text-muted-foreground text-xs">
-            <Loader2 className="w-3 h-3 animate-spin" />Connecting to container shell…
+    <div className="space-y-3">
+      {/* AI Command Assist */}
+      {aiConfigured && (
+        <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
+          <div className="px-4 py-2 border-b border-violet-500/20 flex items-center gap-2">
+            <Sparkles className="w-3.5 h-3.5 text-violet-500" />
+            <span className="text-[10px] font-medium uppercase tracking-wider text-violet-500/80">AI Command Assist</span>
           </div>
-        )}
-        {error && <div className="text-red-400 text-xs">{error}</div>}
-      </div>
-      <form onSubmit={sendInput} className="border-t border-border bg-[#111] flex items-center px-3 py-2 gap-2">
-        <span className="font-mono text-xs text-green-500 shrink-0">$</span>
-        <input
-          ref={inputRef}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === "c" && e.ctrlKey) { socket.emit("docker:exec:input", "\x03"); setInput(""); e.preventDefault(); }
-            if (e.key === "l" && e.ctrlKey) { setLines([]); e.preventDefault(); }
-          }}
-          className="flex-1 bg-transparent font-mono text-xs text-green-400 outline-none placeholder:text-muted-foreground/30"
-          placeholder={connected ? "Type a command…" : "Waiting for connection…"}
-          disabled={!connected}
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <Button type="submit" size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground" disabled={!connected || !input.trim()}>
-          <Play className="w-3 h-3" />
-        </Button>
-      </form>
-      <div className="px-4 py-2 border-t border-border bg-[#0d0d0d] flex gap-4 text-[10px] text-muted-foreground">
-        <span><kbd className="font-mono bg-muted px-1 rounded">Ctrl+C</kbd> interrupt</span>
-        <span><kbd className="font-mono bg-muted px-1 rounded">Ctrl+L</kbd> clear</span>
+          <form onSubmit={handleAiSuggest} className="flex items-center gap-2 px-3 py-2">
+            <input
+              value={aiPrompt}
+              onChange={e => setAiPrompt(e.target.value)}
+              placeholder="Describe what you want to do (e.g. 'list all running processes')…"
+              className="flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/50"
+              autoComplete="off"
+              disabled={aiLoading}
+            />
+            <Button type="submit" size="sm" variant="ghost" className="h-7 w-7 p-0 text-violet-500 hover:text-violet-400 hover:bg-violet-500/10 shrink-0" disabled={aiLoading || !aiPrompt.trim()}>
+              {aiLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            </Button>
+          </form>
+          {aiSuggestion && (
+            <div className="border-t border-violet-500/20 px-3 py-2 flex items-center gap-2 bg-[#0d0d0d]">
+              <span className="font-mono text-xs text-violet-300 flex-1 break-all">{aiSuggestion}</span>
+              <Button
+                size="sm"
+                className="h-7 text-[10px] gap-1 shrink-0 bg-violet-500/20 border border-violet-500/30 text-violet-300 hover:bg-violet-500/30"
+                onClick={useAiSuggestion}
+                disabled={!connected}
+              >
+                <Play className="w-2.5 h-2.5" />Run
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0 text-muted-foreground"
+                onClick={() => setAiSuggestion(null)}
+              >
+                <XCircle className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Terminal Shell */}
+      <div className="rounded-xl border border-border overflow-hidden">
+        <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-muted-foreground" />
+            <span className="text-xs font-medium">Container Shell</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500" : "bg-muted-foreground"}`} />
+            <span className="text-[10px] text-muted-foreground">{connected ? "Connected" : error ? "Error" : "Connecting…"}</span>
+          </div>
+        </div>
+        <div
+          ref={outputRef}
+          className="h-[440px] overflow-y-auto bg-[#0d0d0d] p-4 font-mono text-[12px] text-green-400 leading-relaxed cursor-text"
+          onClick={() => inputRef.current?.focus()}
+        >
+          {lines.map((line, i) => <div key={i} className="whitespace-pre-wrap break-all">{line}</div>)}
+          {!connected && !error && (
+            <div className="flex items-center gap-2 text-muted-foreground text-xs">
+              <Loader2 className="w-3 h-3 animate-spin" />Connecting to container shell…
+            </div>
+          )}
+          {error && <div className="text-red-400 text-xs">{error}</div>}
+        </div>
+        <form onSubmit={sendInput} className="border-t border-border bg-[#111] flex items-center px-3 py-2 gap-2">
+          <span className="font-mono text-xs text-green-500 shrink-0">$</span>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "c" && e.ctrlKey) { socket.emit("docker:exec:input", "\x03"); setInput(""); e.preventDefault(); }
+              if (e.key === "l" && e.ctrlKey) { setLines([]); e.preventDefault(); }
+            }}
+            className="flex-1 bg-transparent font-mono text-xs text-green-400 outline-none placeholder:text-muted-foreground/30"
+            placeholder={connected ? "Type a command…" : "Waiting for connection…"}
+            disabled={!connected}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Button type="submit" size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground" disabled={!connected || !input.trim()}>
+            <Play className="w-3 h-3" />
+          </Button>
+        </form>
+        <div className="px-4 py-2 border-t border-border bg-[#0d0d0d] flex gap-4 text-[10px] text-muted-foreground">
+          <span><kbd className="font-mono bg-muted px-1 rounded">Ctrl+C</kbd> interrupt</span>
+          <span><kbd className="font-mono bg-muted px-1 rounded">Ctrl+L</kbd> clear</span>
+        </div>
       </div>
     </div>
   );
@@ -1135,6 +1302,280 @@ function BackupTab({ containerName }: { containerName: string }) {
   );
 }
 
+// ── AI Tab ────────────────────────────────────────────────────────────────────
+type ChatMsg = { role: "user" | "assistant"; content: string };
+
+function AiTab({ container }: { container: DockerContainer }) {
+  const { data: aiSettings, isLoading: loadingSettings } = useGetAiSettings();
+  const configured = aiSettings?.configured ?? false;
+
+  const containerName = (container.names[0] || container.shortId).replace(/^\//, "");
+
+  const [analysis, setAnalysis] = useState<AiAnalysis | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const SYSTEM_CTX =
+    `You are a Docker and DevOps expert assistant integrated into Docklet. ` +
+    `The user is asking about the container: name="${containerName}", image="${container.image}", state="${container.state}". ` +
+    `Answer concisely and practically. Use markdown for code blocks when helpful.`;
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, chatLoading]);
+
+  async function handleAnalyze() {
+    setAnalyzing(true);
+    setAnalysis(null);
+    try {
+      const logs = await dockerLogs(container.id, 200).then(r => r.logs).catch(() => "(logs unavailable)");
+      const result = await aiAnalyzeLogs({
+        logs,
+        containerName,
+        containerState: container.state,
+        containerImage: container.image,
+      });
+      setAnalysis(result);
+    } catch (err: any) {
+      toast.error(err.message || "AI analysis failed");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function handleChat(e: React.FormEvent) {
+    e.preventDefault();
+    const text = chatInput.trim();
+    if (!text || chatLoading) return;
+    const newMsgs: ChatMsg[] = [...messages, { role: "user", content: text }];
+    setMessages(newMsgs);
+    setChatInput("");
+    setChatLoading(true);
+    try {
+      const r = await aiChat(newMsgs.map(m => ({ role: m.role, content: m.content })), SYSTEM_CTX);
+      setMessages(prev => [...prev, { role: "assistant", content: r.content }]);
+    } catch (err: any) {
+      toast.error(err.message || "AI request failed");
+      setMessages(prev => [...prev, { role: "assistant", content: `Error: ${err.message}` }]);
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
+  if (loadingSettings) {
+    return <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground text-xs"><Loader2 className="w-4 h-4 animate-spin" />Loading…</div>;
+  }
+
+  if (!configured) {
+    return (
+      <div className="rounded-xl border border-dashed border-border p-10 text-center space-y-4">
+        <div className="w-14 h-14 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto">
+          <Sparkles className="w-7 h-7 text-violet-500" />
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold">AI Not Configured</h3>
+          <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
+            Set up your NVIDIA API key on the AI page to enable log analysis and container chat.
+          </p>
+        </div>
+        <Link href="/ai">
+          <Button size="sm" className="h-8 gap-2">
+            <Sparkles className="w-3.5 h-3.5" />Set Up AI
+          </Button>
+        </Link>
+      </div>
+    );
+  }
+
+  const healthColors: Record<string, string> = {
+    healthy: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+    error: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
+    warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+    unknown: "bg-muted text-muted-foreground border-border",
+  };
+  const healthLabel: Record<string, string> = { healthy: "✓ Healthy", error: "✗ Error", warning: "⚠ Warning", unknown: "? Unknown" };
+
+  return (
+    <div className="space-y-5">
+      {/* Analyze panel */}
+      <div className="rounded-xl border border-border overflow-hidden">
+        <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-violet-500" />
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Log Analysis</span>
+            {analysis && (
+              <Badge className={`text-[10px] rounded-full px-2 py-0 ${healthColors[analysis.health] || healthColors.unknown}`}>
+                {healthLabel[analysis.health] || analysis.health}
+              </Badge>
+            )}
+          </div>
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={handleAnalyze} disabled={analyzing}>
+            {analyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3 text-violet-500" />}
+            {analyzing ? "Analyzing…" : analysis ? "Re-analyze" : "Analyze Container"}
+          </Button>
+        </div>
+
+        {!analysis && !analyzing && (
+          <div className="p-6 text-center space-y-2">
+            <Bot className="w-8 h-8 text-muted-foreground/30 mx-auto" />
+            <p className="text-xs text-muted-foreground">Click "Analyze Container" to let AI inspect the logs and give you a health report.</p>
+            <p className="text-[11px] text-muted-foreground/60">AI will check for errors, crashes, warnings, and provide recommendations.</p>
+          </div>
+        )}
+
+        {analyzing && (
+          <div className="p-6 flex flex-col items-center gap-3">
+            <Loader2 className="w-7 h-7 animate-spin text-violet-500" />
+            <p className="text-xs text-muted-foreground">Fetching logs and analyzing with AI…</p>
+          </div>
+        )}
+
+        {analysis && !analyzing && (
+          <div className="p-4 space-y-4">
+            <p className="text-sm leading-relaxed">{analysis.summary}</p>
+
+            {analysis.crashReason && (
+              <div className="flex gap-3 bg-red-500/5 border border-red-500/20 rounded-xl p-3">
+                <TriangleAlert className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[10px] font-semibold text-red-500 uppercase tracking-wide mb-1">Crash Reason</p>
+                  <p className="text-xs text-red-600 dark:text-red-400">{analysis.crashReason}</p>
+                </div>
+              </div>
+            )}
+
+            {analysis.logHighlights?.length > 0 && (
+              <div className="rounded-lg border border-border overflow-hidden">
+                <div className="px-3 py-2 bg-muted/40 border-b border-border">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Key Log Lines</span>
+                </div>
+                <div className="bg-[#0d0d0d] p-3 space-y-1">
+                  {analysis.logHighlights.map((line, i) => (
+                    <div key={i} className="font-mono text-[11px] text-amber-400 whitespace-pre-wrap break-all">{line}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {analysis.issues?.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Issues Found</p>
+                {analysis.issues.map((issue, i) => (
+                  <div key={i} className="flex gap-2 items-start text-xs">
+                    <span className="text-amber-500 shrink-0 mt-0.5">•</span>
+                    <span>{issue}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {analysis.recommendations?.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Recommendations</p>
+                {analysis.recommendations.map((rec, i) => (
+                  <div key={i} className="flex gap-2 items-start text-xs">
+                    <Lightbulb className="w-3.5 h-3.5 text-violet-500 shrink-0 mt-0.5" />
+                    <span>{rec}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Chat panel */}
+      <div className="rounded-xl border border-border overflow-hidden flex flex-col" style={{ minHeight: "420px" }}>
+        <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bot className="w-4 h-4 text-violet-500" />
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Container Chat</span>
+            <Badge className="text-[10px] bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20 rounded-full px-2 py-0">
+              {aiSettings?.model?.split("/").pop() || "AI"}
+            </Badge>
+          </div>
+          {messages.length > 0 && (
+            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground gap-1" onClick={() => setMessages([])}>
+              <RotateCcw className="w-3 h-3" />Clear
+            </Button>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ maxHeight: "380px" }}>
+          {messages.length === 0 && (
+            <div className="h-full flex flex-col items-center justify-center text-center gap-3 py-8">
+              <Bot className="w-8 h-8 text-muted-foreground/30" />
+              <p className="text-xs text-muted-foreground">Ask anything about <strong>{containerName}</strong>.</p>
+              <div className="flex flex-wrap gap-2 justify-center max-w-sm">
+                {[
+                  `Why is ${containerName} restarting?`,
+                  "How do I check memory usage?",
+                  "What logs should I look for?",
+                  "How do I connect to this container's shell?",
+                ].map(q => (
+                  <button key={q} onClick={() => setChatInput(q)}
+                    className="text-[11px] bg-muted hover:bg-muted/80 border border-border px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors text-left">
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+              <div className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center border ${
+                msg.role === "user"
+                  ? "bg-primary/10 border-primary/20 text-primary"
+                  : "bg-violet-500/10 border-violet-500/20 text-violet-500"
+              }`}>
+                {msg.role === "user" ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
+              </div>
+              <div className={`flex-1 max-w-[85%] rounded-xl px-3.5 py-2.5 text-xs leading-relaxed ${
+                msg.role === "user"
+                  ? "bg-primary text-primary-foreground ml-auto"
+                  : "bg-muted/50 border border-border"
+              }`}>
+                <pre className="whitespace-pre-wrap font-sans break-words">{msg.content}</pre>
+              </div>
+            </div>
+          ))}
+
+          {chatLoading && (
+            <div className="flex gap-3">
+              <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center border bg-violet-500/10 border-violet-500/20 text-violet-500">
+                <Bot className="w-3.5 h-3.5" />
+              </div>
+              <div className="bg-muted/50 border border-border rounded-xl px-3.5 py-3 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-violet-500" />
+                <span className="text-xs text-muted-foreground">Thinking…</span>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <form onSubmit={handleChat} className="border-t border-border bg-background flex items-center gap-2 p-3">
+          <Input
+            value={chatInput}
+            onChange={e => setChatInput(e.target.value)}
+            placeholder={`Ask about ${containerName}…`}
+            className="h-9 text-sm flex-1"
+            disabled={chatLoading}
+            autoComplete="off"
+          />
+          <Button type="submit" size="sm" className="h-9 w-9 p-0 shrink-0" disabled={!chatInput.trim() || chatLoading}>
+            <Send className="w-4 h-4" />
+          </Button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Docker SVG Logo ───────────────────────────────────────────────────────────
 function DockerLogo({ className }: { className?: string }) {
   return (
@@ -1262,6 +1703,7 @@ export default function ContainerDetailPage() {
           {activeTab === "schedule" && <ScheduleTab containerName={containerName} />}
           {activeTab === "domain" && <DomainTab containerName={containerName} />}
           {activeTab === "backup" && <BackupTab containerName={containerName} />}
+          {activeTab === "ai" && <AiTab container={container} />}
         </main>
       </div>
     </div>

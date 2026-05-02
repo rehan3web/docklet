@@ -1009,3 +1009,48 @@ export const verifyVerifiedDomain = (id: number) =>
 
 export const getDomainsServerIp = () =>
   apiFetch<{ ip: string }>("/domains/server-ip");
+
+// ── AI ────────────────────────────────────────────────────────────────────────
+
+export function useGetAiSettings() {
+  return useQuery({
+    queryKey: ["ai-settings"],
+    queryFn: () => apiFetch<{ configured: boolean; model: string; apiKeyMasked: string | null }>("/terminal/settings"),
+    staleTime: 10_000,
+  });
+}
+
+export async function saveAiSettings(apiKey: string, model?: string): Promise<{ ok: boolean }> {
+  return apiFetch("/terminal/settings", { method: "POST", body: JSON.stringify({ apiKey, model }) });
+}
+
+export async function deleteAiSettings(): Promise<{ ok: boolean }> {
+  return apiFetch("/terminal/settings", { method: "DELETE" });
+}
+
+export type AiAnalysis = {
+  health: "healthy" | "warning" | "error" | "unknown";
+  summary: string;
+  crashReason: string | null;
+  issues: string[];
+  recommendations: string[];
+  logHighlights: string[];
+  model: string;
+};
+
+export async function aiAnalyzeLogs(data: {
+  logs: string;
+  containerName?: string;
+  containerState?: string;
+  containerImage?: string;
+  context?: string;
+}): Promise<AiAnalysis> {
+  return apiFetch("/terminal/ai/analyze", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function aiChat(
+  messages: { role: string; content: string }[],
+  systemContext?: string
+): Promise<{ content: string; model: string }> {
+  return apiFetch("/terminal/ai/chat", { method: "POST", body: JSON.stringify({ messages, systemContext }) });
+}

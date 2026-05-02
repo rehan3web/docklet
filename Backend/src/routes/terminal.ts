@@ -311,4 +311,114 @@ router.post('/ai', authenticateToken, async (req, res) => {
     }
 });
 
+// ── AI Log Analysis ───────────────────────────────────────────────────────────
+
+router.post('/ai/analyze', authenticateToken, async (req, res) => {
+    const { logs, containerName, containerState, containerImage, context } = req.body || {};
+
+    const apiKey = await getSetting('nvidia_api_key');
+    if (!apiKey) {
+        return res.status(400).json({
+            configured: false,
+            message: 'AI is not configured. Go to the AI page to set up your API key.',
+        });
+    }
+    const model = (await getSetting('nvidia_model')) || NVIDIA_DEFAULT_MODEL;
+
+    const systemPrompt =
+        'You are a Docker container operations expert and DevOps engineer. ' +
+        'Analyze the provided container logs and metadata, then respond with a valid JSON object ' +
+        'containing exactly these keys: ' +
+        '"health" (string: "healthy", "warning", "error", or "unknown"), ' +
+        '"summary" (string: 2-3 sentence plain-English summary of what is happening), ' +
+        '"crashReason" (string or null: clear explanation of crash/failure, or null if healthy), ' +
+        '"issues" (array of strings: specific problems found), ' +
+        '"recommendations" (array of strings: actionable next steps), ' +
+        '"logHighlights" (array of up to 5 strings: the most important log lines). ' +
+        'Be technical but readable. Focus on actionable insights. Output only the JSON object, no markdown.';
+
+    const userContent =
+        `Container: ${containerName || 'unknown'}\nImage: ${containerImage || 'unknown'}\nState: ${containerState || 'unknown'}` +
+        (context ? `\nContext: ${context}` : '') +
+        `\n\nLogs:\n${(logs || '').slice(0, 8000)}`;
+
+    try {
+        const openai = new OpenAI({ apiKey, baseURL: NVIDIA_BASE_URL });
+        const completion = await openai.chat.completions.create({
+            model,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userContent },
+            ],
+            temperature: 0.3,
+            max_tokens: 1024,
+        });
+
+        const raw = (completion.choices?.[0]?.message?.content || '').trim();
+        // Strip markdown fences if model wrapped response
+        const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        let parsed: any = {};
+        try {
+            parsed = JSON.parse(cleaned);
+        } catch {
+            parsed = { health: 'unknown', summary: raw, crashReason: null, issues: [], recommendations: [], logHighlights: [] };
+        }
+        res.json({ ...parsed, model });
+    } catch (err: any) {
+        const upstreamStatus: number = err?.status || 500;
+        let clientStatus: number;
+        let message: string;
+        if (upstreamStatus === 401 || upstreamStatus === 403) {
+            clientStatus = 400;
+            message = 'AI API key is invalid or expired. Go to the AI page to update it.';
+        } else {
+            clientStatus = upstreamStatus >= 100 && upstreamStatus < 600 ? upstreamStatus : 500;
+            message = err?.message || 'Failed to reach AI';
+        }
+        res.status(clientStatus).json({ message });
+    }
+});
+
+// ── AI Chat ───────────────────────────────────────────────────────────────────
+
+router.post('/ai/chat', authenticateToken, async (req, res) => {
+    const { messages, systemContext } = req.body || {};
+
+    const apiKey = await getSetting('nvidia_api_key');
+    if (!apiKey) {
+        return res.status(400).json({
+            configured: false,
+            message: 'AI is not configured. Go to the AI page to set up your API key.',
+        });
+    }
+    const model = (await getSetting('nvidia_model')) || NVIDIA_DEFAULT_MODEL;
+
+    try {
+        const openai = new OpenAI({ apiKey, baseURL: NVIDIA_BASE_URL });
+        const completion = await openai.chat.completions.create({
+            model,
+            messages: [
+                { role: 'system', content: systemContext || 'You are a helpful Docker and DevOps assistant. Be concise and practical.' },
+                ...(messages || []),
+            ],
+            temperature: 0.5,
+            max_tokens: 1024,
+        });
+        const content = (completion.choices?.[0]?.message?.content || '').trim();
+        res.json({ content, model });
+    } catch (err: any) {
+        const upstreamStatus: number = err?.status || 500;
+        let clientStatus: number;
+        let message: string;
+        if (upstreamStatus === 401 || upstreamStatus === 403) {
+            clientStatus = 400;
+            message = 'AI API key is invalid or expired. Go to the AI page to update it.';
+        } else {
+            clientStatus = upstreamStatus >= 100 && upstreamStatus < 600 ? upstreamStatus : 500;
+            message = err?.message || 'Failed to reach AI';
+        }
+        res.status(clientStatus).json({ message });
+    }
+});
+
 export default router;
