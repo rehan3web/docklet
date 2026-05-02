@@ -886,6 +886,10 @@ async function runAgentLoop(
     const handled = await tryDomainConnect(userId, agentId, message);
     if (handled) return;
 
+    // ── Fast path: known-service install (Redis, etc.) ───────────────────
+    const serviceHandled = await tryServiceInstall(userId, agentId, message);
+    if (serviceHandled) return;
+
     // ── Phase 1: Plan ──────────────────────────────────────────────────────
     emitToUser(userId, 'agent:log', {
         agentId, type: 'thinking',
@@ -900,6 +904,12 @@ async function runAgentLoop(
         emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Planning failed' });
         return;
     }
+
+    // Emit a debug line showing how many steps were planned
+    emitToUser(userId, 'agent:log', {
+        agentId, type: 'info',
+        content: `Plan ready — ${plan.steps.length} step(s): ${plan.steps.map(s => s.type).join(', ')}`,
+    });
 
     emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: plan.summary });
 
