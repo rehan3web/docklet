@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 import { authenticateToken } from '../middleware/auth';
 import { getSetting } from '../lib/settings';
 import { emitToUser } from '../lib/socket';
+import { getConnection } from '../lib/db';
 
 const router = express.Router();
 
@@ -15,6 +16,13 @@ const MAX_WAIT_MS          = 30_000; // cap on any single "wait" step
 const MAX_STEPS_PER_PLAN   = 20;     // cap total steps per plan/fix
 const MAX_FIX_STEPS        = 15;     // cap fix steps from evaluation AI
 const LOOP_TIMEOUT_MS      = 10 * 60 * 1000; // 10-minute hard stop
+
+// ── Cancellation registry ─────────────────────────────────────────────────────
+const cancelledAgents = new Set<string>();
+
+function cancelAgent(agentId: string): void { cancelledAgents.add(agentId); }
+function isCancelled(agentId: string): boolean { return cancelledAgents.has(agentId); }
+function clearCancel(agentId: string): void { cancelledAgents.delete(agentId); }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -29,6 +37,19 @@ function isDockerAvailable(): boolean {
     catch { return false; }
 }
 
+async function getDomainContext(): Promise<string> {
+    try {
+        const db = await getConnection();
+        const rows = await db.query(
+            `SELECT domain, target_port, verified, ssl_enabled FROM docklet_proxy_domains ORDER BY created_at DESC LIMIT 20`
+        );
+        if (!rows.rows.length) return 'No proxy domains configured.';
+        return 'Configured proxy domains:\n' + rows.rows.map((r: any) =>
+            `  - ${r.domain} → port ${r.target_port} | verified: ${r.verified} | ssl: ${r.ssl_enabled}`
+        ).join('\n');
+    } catch { return 'Could not fetch domain list (DB unavailable).'; }
+}
+
 function getDockerContext(): string {
     try {
         const out = execSync(
@@ -41,6 +62,94 @@ function getDockerContext(): string {
             return `  - ${name} (${image}) [${status}] ports: ${ports || 'none'}`;
         }).join('\n');
     } catch { return 'Unable to fetch container list.'; }
+}
+
+// ── SSL helpers (mirrored from proxy.ts so agent can enable SSL inline) ───────
+
+const NGINX_CONFIGS_DIR_AGENT = require('path').join(process.cwd(), 'nginx-configs');
+const NGINX_CONTAINER_AGENT   = process.env.NGINX_CONTAINER_NAME || 'docklet-nginx';
+const SELF_CONTAINER_AGENT    = process.env.SELF_CONTAINER_NAME  || 'docklet-server';
+
+function isRootDomain(domain: string): boolean { return domain.split('.').length === 2; }
+function sslServerNames(domain: string): string { return isRootDomain(domain) ? `${domain} www.${domain}` : domain; }
+function sslDomainArgs(domain: string): string[] {
+    return (isRootDomain(domain) ? [domain, `www.${domain}`] : [domain]).flatMap(d => ['-d', d]);
+}
+
+async function getAgentServerIp(): Promise<string> {
+    try { const r = await fetch('https://api.ipify.org?format=json'); return ((await r.json()) as any).ip; }
+    catch { return 'YOUR_SERVER_IP'; }
+}
+
+function nginxHttpsConfig(domain: string, port: number, serverIp: string): string {
+    const names = sslServerNames(domain);
+    return `# Managed by Docklet Agent
+server { listen 80; server_name ${names};
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { return 301 https://$host$request_uri; }
+}
+server { listen 443 ssl http2; server_name ${names};
+    ssl_certificate     /etc/letsencrypt/live/${domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    location / {
+        proxy_pass http://${serverIp}:${port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+`;
+}
+
+async function agentEnableSsl(
+    domain: string, userId: string, agentId: string, logLines: string[]
+): Promise<{ success: boolean; url?: string }> {
+    const fs   = require('fs');
+    const path = require('path');
+    const db   = await getConnection();
+    const { rows } = await db.query('SELECT * FROM docklet_proxy_domains WHERE domain = $1', [domain]);
+    const row = rows[0];
+    if (!row) return { success: false };
+    if (!row.verified) return { success: false };
+    if (row.ssl_enabled) return { success: true, url: `https://${domain}` };
+
+    emitToUser(userId, 'agent:log', { agentId, type: 'info', content: `Running certbot for ${domain}…` });
+
+    const certOk = await new Promise<boolean>((resolve) => {
+        const child = spawn('docker', [
+            'run', '--rm', '--volumes-from', SELF_CONTAINER_AGENT,
+            'certbot/certbot', 'certonly',
+            '--webroot', '-w', '/var/www/certbot',
+            '--non-interactive', '--agree-tos',
+            '--email', `admin@${domain}`,
+            ...sslDomainArgs(domain),
+        ]);
+        let out = '';
+        child.stdout.on('data', (d: Buffer) => { out += d.toString(); logLines.push(d.toString()); emitToUser(userId, 'agent:log', { agentId, type: 'output', content: d.toString().trim() }); });
+        child.stderr.on('data', (d: Buffer) => { out += d.toString(); logLines.push(d.toString()); });
+        child.on('error', () => resolve(false));
+        child.on('close', (code: number) => resolve(code === 0));
+    });
+
+    if (!certOk) return { success: false };
+
+    const serverIp = await getAgentServerIp();
+    if (!fs.existsSync(NGINX_CONFIGS_DIR_AGENT)) fs.mkdirSync(NGINX_CONFIGS_DIR_AGENT, { recursive: true });
+    fs.writeFileSync(path.join(NGINX_CONFIGS_DIR_AGENT, `${domain}.conf`), nginxHttpsConfig(domain, row.target_port, serverIp));
+
+    await new Promise<void>((resolve) => {
+        const child = spawn('docker', ['exec', NGINX_CONTAINER_AGENT, 'nginx', '-s', 'reload']);
+        child.on('close', () => resolve()); child.on('error', () => resolve());
+    });
+
+    await db.query('UPDATE docklet_proxy_domains SET ssl_enabled = TRUE, updated_at = NOW() WHERE domain = $1', [domain]);
+    return { success: true, url: `https://${domain}` };
 }
 
 function stopContainersOnPort(port: number): void {
@@ -63,7 +172,8 @@ type AgentStep =
     | { type: 'docker_stop';    container: string; description: string; continueOnError?: boolean }
     | { type: 'docker_remove';  container: string; description: string; continueOnError?: boolean }
     | { type: 'docker_logs';    container: string; description: string }
-    | { type: 'docker_free_port'; port: number; description: string };
+    | { type: 'docker_free_port'; port: number; description: string }
+    | { type: 'proxy_enable_ssl'; domain: string; description: string };
 
 type ActionPlan = {
     requiresDocker: boolean;
@@ -102,6 +212,14 @@ ENVIRONMENT CONSTRAINTS (this host is a shared/containerized Linux environment):
 - Elasticsearch/OpenSearch: set -e "discovery.type=single-node" and -e "xpack.security.enabled=false" instead of kernel tweaks.
 - If a previous attempt failed with "not allowed", "operation not permitted", or "invalid argument" for a flag, OMIT that flag entirely — do not retry it.
 
+DOMAIN & SSL AUTOMATION:
+- You will receive a DOMAIN CONTEXT list showing each domain, its target port, whether it is verified (DNS A record points to this server), and whether SSL is already enabled.
+- If the user asks to "connect a domain" or "enable SSL" for a domain:
+  1. Check the domain context. If the domain does NOT exist or verified=false → output a single "message" step telling the user to go to Settings > Reverse Proxy, add the domain, point DNS A record to this server's IP, then click Verify. Do NOT proceed further.
+  2. If verified=true and ssl_enabled=false → use "proxy_enable_ssl" step to issue an SSL certificate via Let's Encrypt and reload Nginx automatically.
+  3. If ssl_enabled=true → output a "message" step saying SSL is already active and provide the https:// URL.
+- The nginx container name is "docklet-nginx". The certbot webroot path is /var/www/certbot. Letsencrypt volume is "letsencrypt".
+
 STEP TYPES:
 - "message": { "content": "..." }
 - "wait": { "ms": 3000, "description": "Wait for service to initialize" }
@@ -113,6 +231,7 @@ STEP TYPES:
 - "docker_free_port": { "port": 27017, "description": "..." }
 - "docker_logs": { "container": "name", "description": "..." }
 - "shell": { "command": "single-command-no-operators", "description": "...", "continueOnError": false }
+- "proxy_enable_ssl": { "domain": "example.com", "description": "Issue SSL certificate via Let's Encrypt" }
 
 Respond ONLY with valid JSON — no markdown fences, no extra text:
 { "requiresDocker": true, "summary": "...", "steps": [...] }`;
@@ -163,8 +282,9 @@ function makeOpenAI(apiKey: string): OpenAI {
 }
 
 async function planWithAI(message: string, apiKey: string, model: string): Promise<ActionPlan> {
-    const context    = isDockerAvailable() ? getDockerContext() : 'Docker is not available.';
-    const userPrompt = `LIVE DOCKER CONTEXT:\n${context}\n\nUSER REQUEST: ${message}`;
+    const context      = isDockerAvailable() ? getDockerContext() : 'Docker is not available.';
+    const domainCtx    = await getDomainContext();
+    const userPrompt   = `LIVE DOCKER CONTEXT:\n${context}\n\nDOMAIN CONTEXT:\n${domainCtx}\n\nUSER REQUEST: ${message}`;
 
     const res = await makeOpenAI(apiKey).chat.completions.create({
         model,
@@ -423,6 +543,18 @@ async function executeSteps(
             }
             continue;
         }
+
+        if (step.type === 'proxy_enable_ssl') {
+            cmd(`Enabling SSL for ${step.domain} via Let's Encrypt`);
+            const result = await agentEnableSsl(step.domain, userId, agentId, logLines);
+            if (!result.success) {
+                err(`SSL certificate failed for ${step.domain}. Ensure the domain is verified and DNS is pointing to this server.`);
+                return { failed: true, log: logLines.join('\n') };
+            }
+            ok(`SSL enabled for ${step.domain} — ${result.url}`);
+            emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: `✓ SSL is active. Your site is now available at **${result.url}**` });
+            continue;
+        }
     }
 
     return { failed: false, log: logLines.join('\n') };
@@ -437,10 +569,14 @@ async function runAgentLoop(
     apiKey: string,
     model: string
 ): Promise<void> {
+    clearCancel(agentId);
     const loopStart = Date.now();
 
-    // Guard: abort if the loop has been running too long (hard stop)
     function timedOut(): boolean {
+        if (isCancelled(agentId)) {
+            emitToUser(userId, 'agent:log', { agentId, type: 'error', content: 'Agent stopped by user.' });
+            return true;
+        }
         if (Date.now() - loopStart > LOOP_TIMEOUT_MS) {
             emitToUser(userId, 'agent:log', {
                 agentId, type: 'error',
@@ -636,6 +772,14 @@ router.post('/run', authenticateToken, async (req, res) => {
             : (err?.message || 'Agent failed');
         return res.status(status === 401 || status === 403 ? 400 : status).json({ message: msg });
     }
+});
+
+router.post('/cancel', authenticateToken, async (req, res) => {
+    const { agentId } = req.body || {};
+    if (!agentId || typeof agentId !== 'string')
+        return res.status(400).json({ message: 'agentId required' });
+    cancelAgent(agentId);
+    res.json({ cancelled: true, agentId });
 });
 
 router.post('/install-docker', authenticateToken, async (req, res) => {

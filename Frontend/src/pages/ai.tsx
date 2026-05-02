@@ -3,7 +3,7 @@ import {
   Sparkles, Key, Cpu, CheckCircle, XCircle, Loader2, Trash2, Send, Bot,
   User, RotateCcw, ExternalLink, ChevronDown, ChevronUp, Terminal,
   MessageSquare, Play, AlertTriangle, Package, Zap, Database, Globe,
-  Server, Container, Download, ScanSearch, RefreshCw,
+  Server, Container, Download, ScanSearch, RefreshCw, Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { useTheme } from "@/hooks/use-theme";
 import {
   useGetAiSettings, saveAiSettings, deleteAiSettings,
-  aiChat, agentRun, agentInstallDocker, getToken,
+  aiChat, agentRun, agentInstallDocker, agentCancel, getToken,
 } from "@/api/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sun, Moon } from "lucide-react";
@@ -164,11 +164,20 @@ export default function AiPage() {
     } finally { setChatLoading(false); }
   }
 
+  const currentAgentIdRef = useRef<string | null>(null);
+
+  async function handleStopAgent() {
+    const id = currentAgentIdRef.current;
+    if (!id) return;
+    try { await agentCancel(id); } catch { /* ignore */ }
+  }
+
   async function handleAgentRun(userMsg?: string) {
     const text = (userMsg ?? agentInput).trim();
     if (!text || agentRunning) return;
     if (!configured) { toast.error("Please configure your AI API key first."); setShowSetup(true); return; }
     const agentId = `ag_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    currentAgentIdRef.current = agentId;
     setAgentTasks(prev => [...prev, { agentId, userMessage: text, logs: [], done: false }]);
     setAgentInput(""); setAgentRunning(true);
     try {
@@ -452,9 +461,19 @@ export default function AiPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {agentRunning && (
-                        <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-primary/10 text-primary border-primary/20 animate-pulse">
-                          Running
-                        </Badge>
+                        <>
+                          <Badge variant="outline" className="text-[10px] rounded-full px-2 py-0 bg-primary/10 text-primary border-primary/20 animate-pulse">
+                            Running
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-[11px] text-destructive hover:text-destructive hover:bg-destructive/10 gap-1 px-2"
+                            onClick={handleStopAgent}
+                          >
+                            <Square className="w-3 h-3 fill-current" /> Stop
+                          </Button>
+                        </>
                       )}
                       <Button
                         variant="ghost"

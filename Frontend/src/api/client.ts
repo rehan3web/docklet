@@ -1075,6 +1075,10 @@ export async function agentInstallDocker(agentId: string): Promise<{
   return apiFetch("/agent/install-docker", { method: "POST", body: JSON.stringify({ agentId }) });
 }
 
+export async function agentCancel(agentId: string): Promise<{ cancelled: boolean }> {
+  return apiFetch("/agent/cancel", { method: "POST", body: JSON.stringify({ agentId }) });
+}
+
 // ── AI SQL Generator ───────────────────────────────────────────────────────────
 
 export async function aiGenerateSql(prompt: string, schema?: string): Promise<{

@@ -88,21 +88,8 @@ function ContainerStats({ id, running }: { id: string; running: boolean }) {
   );
 }
 
-// ── Docker SVG Logo ───────────────────────────────────────────────────────────
 function DockerLogo({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 17" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="0" y="6" width="3" height="3" rx="0.4" fill="currentColor"/>
-      <rect x="4" y="6" width="3" height="3" rx="0.4" fill="currentColor"/>
-      <rect x="8" y="6" width="3" height="3" rx="0.4" fill="currentColor"/>
-      <rect x="12" y="6" width="3" height="3" rx="0.4" fill="currentColor"/>
-      <rect x="8" y="2" width="3" height="3" rx="0.4" fill="currentColor"/>
-      <rect x="12" y="2" width="3" height="3" rx="0.4" fill="currentColor"/>
-      <rect x="4" y="10" width="3" height="3" rx="0.4" fill="currentColor"/>
-      <rect x="0" y="10" width="3" height="3" rx="0.4" fill="currentColor"/>
-      <path d="M22 8.5C21.5 7 20 6.5 18.5 6.5C18 4.5 16.5 3.5 14.5 3.5V6.5H16V9.5H1C1 12 2.5 14 5 14.5C7.5 15 21 15 22 13C23 11 22.5 10 22 8.5Z" fill="currentColor" opacity="0.35"/>
-    </svg>
-  );
+  return <img src="/docker-icon.png" alt="Docker" className={className} />;
 }
 
 // ── Container Card ────────────────────────────────────────────────────────────
@@ -125,8 +112,6 @@ function ContainerCard({
       className="group relative bg-card border border-border rounded-2xl overflow-hidden cursor-pointer hover:border-primary/40 hover:shadow-md transition-all duration-200"
       onClick={onClick}
     >
-      {/* Status bar */}
-      <div className={`h-0.5 w-full ${running ? "bg-primary" : "bg-muted"}`} />
 
       <div className="p-5">
         {/* Top: logo + name + status */}
