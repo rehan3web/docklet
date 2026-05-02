@@ -3,7 +3,7 @@ import {
   Sparkles, Key, Cpu, CheckCircle, XCircle, Loader2, Trash2, Send, Bot,
   User, RotateCcw, ExternalLink, ChevronDown, ChevronUp, Terminal,
   MessageSquare, Play, AlertTriangle, Package, Zap, Database, Globe,
-  Server, Container, Download,
+  Server, Container, Download, ScanSearch, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +30,7 @@ const NVIDIA_MODELS = [
 ];
 
 type ChatMsg = { role: "user" | "assistant"; content: string };
-type AgentLogType = "thinking" | "ai" | "command" | "output" | "success" | "error" | "info" | "docker_missing";
+type AgentLogType = "thinking" | "ai" | "command" | "output" | "success" | "error" | "info" | "docker_missing" | "verify" | "retry";
 type AgentLog  = { id: string; type: AgentLogType; content: string; timestamp: number };
 type AgentTask = { agentId: string; userMessage: string; logs: AgentLog[]; done: boolean; success?: boolean; summary?: string; dockerMissing?: boolean };
 
@@ -254,6 +254,24 @@ export default function AiPage() {
             <span className="text-xs">{log.content}</span>
           </div>
         );
+      case "verify":
+        return (
+          <div key={log.id} className="flex items-center gap-2 py-1">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/10 border border-primary/20">
+              <ScanSearch className="w-3.5 h-3.5 text-primary animate-pulse shrink-0" />
+              <span className="text-xs font-medium text-primary">{log.content}</span>
+            </div>
+          </div>
+        );
+      case "retry":
+        return (
+          <div key={log.id} className="flex items-center gap-2 py-1">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/50 border border-border">
+              <RefreshCw className="w-3.5 h-3.5 text-muted-foreground animate-spin shrink-0" />
+              <span className="text-xs font-medium text-muted-foreground">{log.content}</span>
+            </div>
+          </div>
+        );
       case "docker_missing":
         return null;
       default:
@@ -387,8 +405,7 @@ export default function AiPage() {
                     <div>
                       <h2 className="text-base font-semibold">DevOps Agent</h2>
                       <p className="text-sm text-muted-foreground mt-0.5">
-                        Tell me what to install or run — I'll pull the Docker image, start the container, and show you live logs.
-                        If Docker isn't installed, I'll offer to install it for you.
+                        Tell me what to install or configure. I'll plan, execute, then automatically verify the result — and fix any issues up to 3 times before giving up.
                       </p>
                     </div>
                   </div>
