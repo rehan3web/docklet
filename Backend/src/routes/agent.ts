@@ -855,6 +855,105 @@ async function tryDomainConnect(
     return true;
 }
 
+// ── Known-service direct install intercept ────────────────────────────────────
+
+/** Service definitions: pattern to detect + hardcoded docker_run args */
+const KNOWN_SERVICES: Array<{
+    pattern: RegExp;
+    name: string;
+    makeSteps: (msg: string) => AgentStep[];
+}> = [
+    {
+        name: 'Redis',
+        pattern: /\bredis\b/i,
+        makeSteps: () => [
+            {
+                type: 'docker_free_port',
+                port: 6379,
+                description: 'Free port 6379 if in use',
+            },
+            {
+                type: 'docker_run',
+                args: [
+                    '-d', '--name', 'redis',
+                    '--restart=unless-stopped',
+                    '-p', '6379:6379',
+                    'redis:7-alpine',
+                    '--loglevel', 'warning',
+                ],
+                description: 'Start Redis 7 on port 6379',
+            },
+            {
+                type: 'wait',
+                ms: 2000,
+                description: 'Wait for Redis to initialise',
+            },
+            {
+                type: 'docker_exec',
+                container: 'redis',
+                command: 'redis-cli ping',
+                description: 'Verify Redis is responding',
+                continueOnError: true,
+            },
+        ],
+    },
+];
+
+/**
+ * If the message is a known-service install request, run the hardcoded steps
+ * directly without going through the AI planner. Returns true if handled.
+ */
+async function tryServiceInstall(
+    userId: string, agentId: string, message: string
+): Promise<boolean> {
+    const isInstall = /\b(install|deploy|start|run|setup|set up|add|launch|create)\b/i.test(message);
+    if (!isInstall) return false;
+
+    for (const svc of KNOWN_SERVICES) {
+        if (!svc.pattern.test(message)) continue;
+
+        emitToUser(userId, 'agent:log', {
+            agentId, type: 'ai',
+            content: `Installing **${svc.name}** directly…`,
+        });
+
+        // Check if already running
+        try {
+            const out = execSync(
+                `docker ps --filter "name=${svc.name.toLowerCase()}" --filter "status=running" --format "{{.Names}}"`,
+                { stdio: 'pipe', timeout: 5_000 }
+            ).toString().trim();
+            if (out) {
+                emitToUser(userId, 'agent:log', {
+                    agentId, type: 'ai',
+                    content: `✓ **${svc.name}** is already running (container: \`${out}\`).`,
+                });
+                emitToUser(userId, 'agent:done', { agentId, success: true, summary: `${svc.name} already running` });
+                return true;
+            }
+        } catch { /* ignore — docker might not be available in dev */ }
+
+        const steps = svc.makeSteps(message);
+        const result = await executeSteps(steps, userId, agentId);
+
+        if (result.failed) {
+            emitToUser(userId, 'agent:log', {
+                agentId, type: 'error',
+                content: `**${svc.name}** installation failed. Check the output above for details.`,
+            });
+            emitToUser(userId, 'agent:done', { agentId, success: false, summary: `${svc.name} install failed` });
+        } else {
+            emitToUser(userId, 'agent:log', {
+                agentId, type: 'ai',
+                content: `✓ **${svc.name}** is running on port ${steps.find((s: AgentStep) => s.type === 'docker_run' && (s as any).args?.includes('6379:6379')) ? '6379' : 'the configured port'}.`,
+            });
+            emitToUser(userId, 'agent:done', { agentId, success: true, summary: `${svc.name} installed` });
+        }
+        return true;
+    }
+    return false;
+}
+
 // ── ReAct loop (Plan → Execute → Verify → Fix → Verify …) ────────────────────
 
 async function runAgentLoop(
