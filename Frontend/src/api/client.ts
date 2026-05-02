@@ -1054,3 +1054,23 @@ export async function aiChat(
 ): Promise<{ content: string; model: string }> {
   return apiFetch("/terminal/ai/chat", { method: "POST", body: JSON.stringify({ messages, systemContext }) });
 }
+
+// ── DevOps Agent ───────────────────────────────────────────────────────────────
+
+export async function agentRun(message: string, agentId: string): Promise<{
+  agentId: string;
+  started?: boolean;
+  dockerMissing?: boolean;
+  summary?: string;
+  configured?: boolean;
+  message?: string;
+}> {
+  return apiFetch("/agent/run", { method: "POST", body: JSON.stringify({ message, agentId }) });
+}
+
+export async function agentInstallDocker(agentId: string): Promise<{
+  agentId: string;
+  started: boolean;
+}> {
+  return apiFetch("/agent/install-docker", { method: "POST", body: JSON.stringify({ agentId }) });
+}
