@@ -94,6 +94,14 @@ RULES:
 8. Container names: lowercase alphanumeric + hyphens only.
 9. Always use --restart=unless-stopped and -d for persistent services.
 
+ENVIRONMENT CONSTRAINTS (this host is a shared/containerized Linux environment):
+- NEVER use --sysctl flags in docker run — they are blocked (e.g. vm.overcommit_memory, net.core.*). Drop them silently.
+- NEVER use --privileged or --cap-add SYS_ADMIN — not allowed.
+- NEVER use --network host — use explicit -p port mappings instead.
+- Redis: run WITHOUT --sysctl; add --loglevel warning to suppress the overcommit warning. Redis works fine without it.
+- Elasticsearch/OpenSearch: set -e "discovery.type=single-node" and -e "xpack.security.enabled=false" instead of kernel tweaks.
+- If a previous attempt failed with "not allowed", "operation not permitted", or "invalid argument" for a flag, OMIT that flag entirely — do not retry it.
+
 STEP TYPES:
 - "message": { "content": "..." }
 - "wait": { "ms": 3000, "description": "Wait for service to initialize" }
@@ -124,6 +132,16 @@ Rules:
 - MongoDB 7+: use "mongosh" not "mongo".
 - NEVER make unnecessary changes — only fix what is actually broken.
 - If ok=true, fixSteps must be an empty array.
+
+CRITICAL FIX RULES (read carefully before generating fixSteps):
+- If a command failed with "not allowed", "invalid argument", "operation not permitted", or "permission denied" for a specific flag or sysctl, that flag is BLOCKED on this host. NEVER include it in fixSteps — omit it entirely.
+- --sysctl flags (e.g. vm.overcommit_memory) are NEVER allowed on this host. Do not use them.
+- --privileged and --cap-add SYS_ADMIN are NOT allowed on this host.
+- --network host is NOT allowed — use -p port mappings instead.
+- Redis: if vm.overcommit_memory was blocked, fix by running Redis WITHOUT any --sysctl, adding --loglevel warning instead. Redis works correctly without kernel tweaks.
+- Elasticsearch/OpenSearch: use -e "discovery.type=single-node" instead of kernel vm.max_map_count changes.
+- If the SAME command failed in multiple prior attempts, do NOT retry it — use a different approach entirely.
+- Only generate fixSteps you are confident will succeed given the above constraints.
 
 Respond ONLY with valid JSON — no markdown, no extra text:
 {
