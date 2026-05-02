@@ -658,6 +658,161 @@ server {
     return { failed: false, log: logLines.join('\n') };
 }
 
+// ── Domain-connect direct intercept (bypasses AI planner entirely) ───────────
+
+/**
+ * Extracts a domain name from a freeform message.
+ * Returns null if no valid domain is found.
+ */
+function extractDomain(msg: string): string | null {
+    const m = msg.match(/\b([a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+)\b/g);
+    if (!m) return null;
+    // Prefer entries that look like subdomains (have 3+ parts) over bare IPs
+    const domains = m.filter(d => !/^\d+\.\d+\.\d+\.\d+$/.test(d) && d.includes('.'));
+    return domains.length ? domains[0].toLowerCase() : null;
+}
+
+/**
+ * Extracts the target container name or keyword from the message.
+ * Returns null if not recognisable.
+ */
+function extractContainerHint(msg: string): string | null {
+    // "into <name>" / "to <name>" / "for <name>" / "container <name>"
+    const m = msg.match(/(?:into|to|for|container|service)\s+([\w\-]+)/i);
+    return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * Gets the host port for a running container by name (partial match).
+ * Returns null if not found.
+ */
+function getContainerHostPort(containerHint: string): number | null {
+    try {
+        const out = execSync(
+            `docker ps --format "{{.Names}}|{{.Ports}}" --filter "status=running"`,
+            { stdio: 'pipe', timeout: 5_000 }
+        ).toString().trim();
+        for (const line of out.split('\n').filter(Boolean)) {
+            const [name, ports] = line.split('|');
+            if (!name.toLowerCase().includes(containerHint)) continue;
+            // e.g. "0.0.0.0:3000->80/tcp" — take the first public host port
+            const pm = ports?.match(/0\.0\.0\.0:(\d+)->/);
+            if (pm) return parseInt(pm[1], 10);
+            // Also try ":::3000->80/tcp"
+            const pm2 = ports?.match(/:::(\d+)->/);
+            if (pm2) return parseInt(pm2[1], 10);
+        }
+    } catch { /* ignore */ }
+    return null;
+}
+
+/**
+ * Checks if the domain (or its parent) is a wildcard-verified base domain.
+ */
+async function getVerifiedBaseDomain(subdomain: string): Promise<{ baseDomain: string; vpsIp: string } | null> {
+    try {
+        const db = await getConnection();
+        // Check exact match first, then parent
+        const parts = subdomain.split('.');
+        const candidates: string[] = [];
+        for (let i = 1; i < parts.length; i++) candidates.push(parts.slice(i).join('.'));
+        candidates.unshift(subdomain);
+        for (const cand of candidates) {
+            const { rows } = await db.query(
+                'SELECT domain, vps_ip FROM verified_domains WHERE domain = $1 AND verified = TRUE',
+                [cand]
+            );
+            if (rows[0]) return { baseDomain: rows[0].domain, vpsIp: rows[0].vps_ip };
+        }
+    } catch { /* ignore */ }
+    return null;
+}
+
+/**
+ * If the message is a domain-connect request, handle it directly without the AI planner.
+ * Returns true if handled, false if the caller should fall through to planWithAI.
+ */
+async function tryDomainConnect(
+    userId: string, agentId: string, message: string
+): Promise<boolean> {
+    // Detect pattern: connect/route/map/point <domain> to/into <container>
+    const isDomainConnect = /\b(connect|route|map|point|attach|link|assign|add domain|enable ssl|ssl)\b/i.test(message)
+        && /\b(domain|subdomain|\.xyz|\.com|\.io|\.net|\.org|\.app)\b/i.test(message);
+    if (!isDomainConnect) return false;
+
+    const domain = extractDomain(message);
+    if (!domain || !domain.includes('.')) return false;
+
+    emitToUser(userId, 'agent:log', { agentId, type: 'thinking', content: `Checking domain ${domain}…` });
+
+    // ── Check proxy table for existing entry ──────────────────────────────
+    let existingEntry: any = null;
+    try {
+        const db = await getConnection();
+        const { rows } = await db.query(
+            'SELECT * FROM docklet_proxy_domains WHERE domain = $1', [domain]
+        );
+        existingEntry = rows[0] ?? null;
+    } catch { /* ignore, will proceed to base domain check */ }
+
+    if (existingEntry?.ssl_enabled) {
+        emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: `✓ SSL is already active for **${domain}**. Your site: **https://${domain}**` });
+        emitToUser(userId, 'agent:done', { agentId, success: true, summary: `SSL already active for ${domain}` });
+        return true;
+    }
+
+    if (existingEntry?.verified && !existingEntry.ssl_enabled) {
+        // Has entry, just needs SSL
+        emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: `Domain ${domain} is already in the proxy. Enabling SSL…` });
+        const logLines: string[] = [];
+        const result = await agentEnableSsl(domain, userId, agentId, logLines);
+        if (result.success) {
+            emitToUser(userId, 'agent:log', { agentId, type: 'success', content: `SSL enabled for ${domain} — ${result.url}` });
+            emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: `✓ Done! Your site is live at **${result.url}**` });
+            emitToUser(userId, 'agent:done', { agentId, success: true, summary: `SSL enabled for ${domain}` });
+        } else {
+            emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Certbot failed for ${domain}. Check DNS and try again.` });
+            emitToUser(userId, 'agent:done', { agentId, success: false, summary: `SSL failed for ${domain}` });
+        }
+        return true;
+    }
+
+    // ── No proxy entry yet — check wildcard base domain ───────────────────
+    const base = await getVerifiedBaseDomain(domain);
+    if (!base) {
+        // Not covered by any wildcard
+        emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: `Domain **${domain}** is not verified. Please go to **Domain**, click **Add Domain**, and verify it first.` });
+        emitToUser(userId, 'agent:done', { agentId, success: false, summary: `Domain ${domain} not verified` });
+        return true;
+    }
+
+    // ── Wildcard covers this subdomain — find target port ─────────────────
+    const containerHint = extractContainerHint(message) ?? domain.split('.')[0];
+    let targetPort = getContainerHostPort(containerHint);
+
+    if (!targetPort) {
+        emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Could not find a running container matching "${containerHint}". Make sure the container is running and try again.` });
+        emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Container not found' });
+        return true;
+    }
+
+    emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: `Base domain **${base.baseDomain}** is wildcard-verified. Connecting **${domain}** → port **${targetPort}**…` });
+
+    // ── Step 1: Create proxy entry ────────────────────────────────────────
+    const steps: AgentStep[] = [
+        { type: 'proxy_create_domain', domain, targetPort, description: `Register ${domain} → port ${targetPort}` },
+        { type: 'proxy_enable_ssl',    domain,              description: `Enable SSL for ${domain}` },
+    ];
+    const result = await executeSteps(steps, userId, agentId);
+    if (result.failed) {
+        emitToUser(userId, 'agent:done', { agentId, success: false, summary: `Failed to connect ${domain}` });
+    } else {
+        emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: `✓ Done! **${domain}** is now live at **https://${domain}**` });
+        emitToUser(userId, 'agent:done', { agentId, success: true, summary: `${domain} connected with SSL` });
+    }
+    return true;
+}
+
 // ── ReAct loop (Plan → Execute → Verify → Fix → Verify …) ────────────────────
 
 async function runAgentLoop(
@@ -684,6 +839,10 @@ async function runAgentLoop(
         }
         return false;
     }
+
+    // ── Fast path: domain-connect request (no AI planning needed) ──────────
+    const handled = await tryDomainConnect(userId, agentId, message);
+    if (handled) return;
 
     // ── Phase 1: Plan ──────────────────────────────────────────────────────
     emitToUser(userId, 'agent:log', {
