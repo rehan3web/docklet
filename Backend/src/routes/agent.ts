@@ -535,32 +535,47 @@ async function executeSteps(
         }
 
         if (step.type === 'docker_run') {
-            const label = `docker run ${step.args.join(' ')}`;
+            // ── Hard-strip blocked flags before running ──────────────────────
+            let safeArgs = step.args.filter((a, i, arr) => {
+                // Strip --sysctl and its value (next token)
+                if (a === '--sysctl') return false;
+                if (i > 0 && arr[i - 1] === '--sysctl') return false;
+                // Strip --sysctl=... inline form
+                if (a.startsWith('--sysctl=')) return false;
+                // Strip --privileged and --cap-add SYS_ADMIN
+                if (a === '--privileged') return false;
+                if (a === '--cap-add' ) return false;
+                if (i > 0 && arr[i - 1] === '--cap-add') return false;
+                if (a === '--network' && arr[i + 1] === 'host') return false;
+                if (a === 'host' && i > 0 && arr[i - 1] === '--network') return false;
+                return true;
+            });
+            const label = `docker run ${safeArgs.join(' ')}`;
             cmd(label);
-            let res = await streamCommand('docker', ['run', ...step.args], userId, agentId, logLines);
+            let res = await streamCommand('docker', ['run', ...safeArgs], userId, agentId, logLines);
 
             // Auto-recover: name conflict
             if (res.exitCode !== 0 && res.output.includes('already in use')) {
-                const ni = step.args.indexOf('--name');
-                if (ni !== -1 && step.args[ni + 1]) {
-                    const name = step.args[ni + 1];
+                const ni = safeArgs.indexOf('--name');
+                if (ni !== -1 && safeArgs[ni + 1]) {
+                    const name = safeArgs[ni + 1];
                     info(`Container "${name}" exists — removing and retrying…`);
                     await streamCommand('docker', ['rm', '-f', name], userId, agentId, logLines);
-                    res = await streamCommand('docker', ['run', ...step.args], userId, agentId, logLines);
+                    res = await streamCommand('docker', ['run', ...safeArgs], userId, agentId, logLines);
                 }
             }
             // Auto-recover: port conflict
             if (res.exitCode !== 0 && res.output.includes('port is already allocated')) {
-                const ports = step.args.filter(a => /^\d+:\d+$/.test(a)).map(a => parseInt(a.split(':')[0]));
+                const ports = safeArgs.filter(a => /^\d+:\d+$/.test(a)).map(a => parseInt(a.split(':')[0]));
                 if (ports.length > 0) {
                     info(`Port conflict — freeing: ${ports.join(', ')}`);
                     ports.forEach(p => stopContainersOnPort(p));
                     await sleep(1_200);
-                    res = await streamCommand('docker', ['run', ...step.args], userId, agentId, logLines);
+                    res = await streamCommand('docker', ['run', ...safeArgs], userId, agentId, logLines);
                 }
             }
             if (res.exitCode !== 0) {
-                err(`Container failed to start (exit ${res.exitCode})`);
+                err(`Container failed to start (exit ${res.exitCode}): ${res.output.slice(-300)}`);
                 return { failed: true, log: logLines.join('\n') };
             }
             ok('Container started');
