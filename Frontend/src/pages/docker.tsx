@@ -1,59 +1,25 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2, MoreHorizontal, FileText, Network, HardDrive, Terminal, X, KeyRound, Clock, Globe, Cpu, MemoryStick } from "lucide-react";
-import EnvVarsDialog from "@/components/container/EnvVarsDialog";
-import SchedulerDialog from "@/components/container/SchedulerDialog";
-import DomainDialog from "@/components/container/DomainDialog";
-import BackupDialog from "@/components/container/BackupDialog";
+import React, { useState } from "react";
+import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2, Cpu, MemoryStick } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { useTheme } from "@/hooks/use-theme";
+import { useLocation } from "wouter";
 import {
   useGetDockerStatus, useGetDockerContainers,
   dockerStart, dockerStop, dockerRestart, dockerRemove, dockerBulk,
-  dockerLogs, dockerInspect, getContainerStats,
+  getContainerStats,
   type DockerContainer, type ContainerStats,
 } from "@/api/client";
-
-const DB_IMAGES = ['postgres', 'postgre', 'mysql', 'mariadb', 'mongo'];
-function isDbContainer(image: string) {
-  const img = image.toLowerCase();
-  return DB_IMAGES.some(k => img.includes(k));
-}
 import { useQueryClient } from "@tanstack/react-query";
-import { getSocket } from "@/api/socket";
+import { useEffect, useRef, useCallback } from "react";
 
-// ── strip ALL ANSI / VT escape sequences ──────────────────────────────────────
-function stripAnsi(str: string): string {
-  return str
-    // CSI sequences: ESC [ params final-byte
-    .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "")
-    // OSC sequences: ESC ] ... BEL or ST
-    .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, "")
-    // DCS / PM / APC / SOS string sequences: ESC P|X|^|_ ... ST
-    .replace(/\x1B[PX^_][^\x1B]*(?:\x1B\\)/g, "")
-    // ESC with intermediate bytes (e.g. ESC(B = select ASCII charset)
-    .replace(/\x1B[ -/]+[@-~]/g, "")
-    // Remaining 2-char ESC sequences (ESC + any printable ASCII)
-    .replace(/\x1B[@-~]/g, "")
-    // Any lone ESC byte left over
-    .replace(/\x1B/g, "")
-    // C1 control codes (0x80–0x9F)
-    .replace(/[\x80-\x9F]/g, "")
-    // Carriage returns
-    .replace(/\r/g, "");
-}
-
-// ── Container stats helpers ────────────────────────────────────────────────────
+// ── Stats helpers ─────────────────────────────────────────────────────────────
 function fmtBytes(bytes: number) {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}K`;
@@ -69,7 +35,7 @@ function fmtUptime(ms: number) {
   return `${Math.floor(s / 86400)}d`;
 }
 
-function ContainerStatsCell({ id, running }: { id: string; running: boolean }) {
+function ContainerStats({ id, running }: { id: string; running: boolean }) {
   const [stats, setStats] = useState<ContainerStats | null>(null);
   const [errCount, setErrCount] = useState(0);
 
@@ -79,26 +45,20 @@ function ContainerStatsCell({ id, running }: { id: string; running: boolean }) {
     let errorStreak = 0;
     let timerId: ReturnType<typeof setTimeout>;
 
-    const schedule = (delayMs: number) => {
-      timerId = setTimeout(poll, delayMs);
-    };
-
     const poll = async () => {
       if (cancelled) return;
       try {
         const s = await getContainerStats(id);
         if (cancelled) return;
-        // If we get zeros with an error field, treat as soft-error but show data
         setStats(s);
         if (!(s as any).error) { errorStreak = 0; setErrCount(0); }
-        schedule(6000);
+        timerId = setTimeout(poll, 6000);
       } catch {
         if (cancelled) return;
         errorStreak++;
         setErrCount(errorStreak);
-        // Exponential back-off: 10s, 20s, 40s … cap at 60s
         const delay = Math.min(10000 * Math.pow(2, errorStreak - 1), 60000);
-        if (errorStreak < 6) schedule(delay); // stop after 6 consecutive failures
+        if (errorStreak < 6) timerId = setTimeout(poll, delay);
       }
     };
 
@@ -106,417 +66,194 @@ function ContainerStatsCell({ id, running }: { id: string; running: boolean }) {
     return () => { cancelled = true; clearTimeout(timerId); };
   }, [id, running]);
 
-  if (!running) return <span className="text-muted-foreground text-xs">—</span>;
-  if (errCount >= 6) return <span className="text-muted-foreground text-xs" title="Stats unavailable">n/a</span>;
-  if (!stats) return <span className="text-muted-foreground text-xs animate-pulse">…</span>;
+  if (!running) return <span className="text-muted-foreground text-[10px]">—</span>;
+  if (errCount >= 6) return <span className="text-muted-foreground text-[10px]">n/a</span>;
+  if (!stats) return <span className="text-muted-foreground text-[10px] animate-pulse">…</span>;
 
   const cpuColor = stats.cpuPercent > 80 ? "text-red-400" : stats.cpuPercent > 40 ? "text-amber-400" : "text-emerald-400";
-  const memColor = stats.memPercent > 85 ? "text-red-400" : stats.memPercent > 60 ? "text-amber-400" : "text-foreground";
+  const memColor = stats.memPercent > 85 ? "text-red-400" : stats.memPercent > 60 ? "text-amber-400" : "text-muted-foreground";
 
   return (
-    <div className="flex flex-col gap-0.5 text-[10px] font-mono min-w-[80px]">
+    <div className="flex items-center gap-3 text-[10px] font-mono">
       <div className="flex items-center gap-1">
-        <Cpu className="w-2.5 h-2.5 text-muted-foreground shrink-0" />
+        <Cpu className="w-2.5 h-2.5 text-muted-foreground" />
         <span className={cpuColor}>{stats.cpuPercent.toFixed(1)}%</span>
       </div>
       <div className="flex items-center gap-1">
-        <MemoryStick className="w-2.5 h-2.5 text-muted-foreground shrink-0" />
+        <MemoryStick className="w-2.5 h-2.5 text-muted-foreground" />
         <span className={memColor}>{fmtBytes(stats.memUsage)}</span>
-        <span className="text-muted-foreground">/ {fmtBytes(stats.memLimit)}</span>
       </div>
-      {stats.uptimeMs > 0 && (
-        <div className="text-muted-foreground">up {fmtUptime(stats.uptimeMs)}</div>
-      )}
+      {stats.uptimeMs > 0 && <span className="text-muted-foreground">↑{fmtUptime(stats.uptimeMs)}</span>}
     </div>
   );
 }
 
-// ── Logs Dialog ───────────────────────────────────────────────────────────────
-function LogsDialog({ container, open, onClose }: { container: DockerContainer; open: boolean; onClose: () => void }) {
-  const [logs, setLogs] = useState<string>("");
-  const [loading, setLoading] = useState(false);
-  const logRef = useRef<HTMLPreElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    setLogs("");
-    dockerLogs(container.id).then(r => {
-      setLogs(r.logs || "(no logs)");
-    }).catch(err => {
-      setLogs(`Error: ${err.message}`);
-    }).finally(() => setLoading(false));
-  }, [open, container.id]);
-
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [logs]);
-
+// ── Docker SVG Logo ───────────────────────────────────────────────────────────
+function DockerLogo({ className }: { className?: string }) {
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-[760px] p-0 gap-0 overflow-hidden">
-        <DialogHeader className="p-5 pb-3 border-b border-border">
-          <DialogTitle className="text-sm font-medium flex items-center gap-2">
-            <FileText className="w-4 h-4 text-muted-foreground" />
-            Logs — {container.names[0] || container.shortId}
-          </DialogTitle>
-          <DialogDescription className="text-xs">Last 300 lines (stdout + stderr)</DialogDescription>
-        </DialogHeader>
-        <div className="h-[480px] overflow-hidden bg-[#0d0d0d]">
-          {loading ? (
-            <div className="h-full flex items-center justify-center gap-2 text-muted-foreground text-xs">
-              <Loader2 className="w-4 h-4 animate-spin" /> Loading logs…
-            </div>
-          ) : (
-            <pre ref={logRef} className="font-mono text-[11px] text-green-400 p-4 h-full overflow-y-auto whitespace-pre-wrap leading-relaxed">
-              {logs}
-            </pre>
-          )}
-        </div>
-        <div className="p-4 border-t border-border flex justify-end">
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Close</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <svg className={className} viewBox="0 0 24 17" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="6" width="3" height="3" rx="0.4" fill="currentColor"/>
+      <rect x="4" y="6" width="3" height="3" rx="0.4" fill="currentColor"/>
+      <rect x="8" y="6" width="3" height="3" rx="0.4" fill="currentColor"/>
+      <rect x="12" y="6" width="3" height="3" rx="0.4" fill="currentColor"/>
+      <rect x="8" y="2" width="3" height="3" rx="0.4" fill="currentColor"/>
+      <rect x="12" y="2" width="3" height="3" rx="0.4" fill="currentColor"/>
+      <rect x="4" y="10" width="3" height="3" rx="0.4" fill="currentColor"/>
+      <rect x="0" y="10" width="3" height="3" rx="0.4" fill="currentColor"/>
+      <path d="M22 8.5C21.5 7 20 6.5 18.5 6.5C18 4.5 16.5 3.5 14.5 3.5V6.5H16V9.5H1C1 12 2.5 14 5 14.5C7.5 15 21 15 22 13C23 11 22.5 10 22 8.5Z" fill="currentColor" opacity="0.35"/>
+    </svg>
   );
 }
 
-// ── Network Dialog ────────────────────────────────────────────────────────────
-function NetworkDialog({ container, open, onClose }: { container: DockerContainer; open: boolean; onClose: () => void }) {
-  const [data, setData] = useState<Record<string, any>>({});
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    dockerInspect(container.id).then(r => setData(r.networks || {})).catch(() => setData({})).finally(() => setLoading(false));
-  }, [open, container.id]);
-
-  const networks = Object.entries(data);
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-[620px] p-0 gap-0 overflow-hidden">
-        <DialogHeader className="p-5 pb-3 border-b border-border">
-          <DialogTitle className="text-sm font-medium flex items-center gap-2">
-            <Network className="w-4 h-4 text-muted-foreground" />
-            Network — {container.names[0] || container.shortId}
-          </DialogTitle>
-          <DialogDescription className="text-xs">Network configuration for this container</DialogDescription>
-        </DialogHeader>
-        <div className="h-[380px] overflow-y-auto p-4">
-          {loading ? (
-            <div className="flex items-center justify-center gap-2 text-muted-foreground text-xs py-8">
-              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
-            </div>
-          ) : networks.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-8">No network data available</p>
-          ) : (
-            <div className="space-y-4">
-              {networks.map(([name, net]) => (
-                <div key={name} className="rounded-lg border border-border overflow-hidden">
-                  <div className="px-4 py-2 bg-muted/40 border-b border-border">
-                    <span className="font-mono text-xs font-medium text-foreground">{name}</span>
-                  </div>
-                  <table className="w-full text-xs">
-                    <tbody>
-                      {[
-                        ["IP Address", net.IPAddress],
-                        ["Gateway", net.Gateway],
-                        ["Subnet", net.IPPrefixLen ? `/${net.IPPrefixLen}` : "—"],
-                        ["MAC Address", net.MacAddress],
-                        ["Network ID", net.NetworkID?.slice(0, 16)],
-                        ["Endpoint ID", net.EndpointID?.slice(0, 16)],
-                      ].filter(([, v]) => v).map(([k, v]) => (
-                        <tr key={k} className="border-b border-border/50 last:border-0">
-                          <td className="px-4 py-2 text-muted-foreground w-32 shrink-0">{k}</td>
-                          <td className="px-4 py-2 font-mono text-foreground">{v}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="p-4 border-t border-border flex justify-end">
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Close</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Mounts Dialog ─────────────────────────────────────────────────────────────
-function MountsDialog({ container, open, onClose }: { container: DockerContainer; open: boolean; onClose: () => void }) {
-  const [mounts, setMounts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    dockerInspect(container.id).then(r => setMounts(r.mounts || [])).catch(() => setMounts([])).finally(() => setLoading(false));
-  }, [open, container.id]);
+// ── Container Card ────────────────────────────────────────────────────────────
+function ContainerCard({
+  container,
+  busy,
+  onAction,
+  onClick,
+}: {
+  container: DockerContainer;
+  busy: string | null;
+  onAction: (id: string, fn: (id: string) => Promise<void>, label: string, e: React.MouseEvent) => void;
+  onClick: () => void;
+}) {
+  const running = container.state === "running";
+  const name = (container.names[0] || container.shortId).replace(/^\//, "");
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-[680px] p-0 gap-0 overflow-hidden">
-        <DialogHeader className="p-5 pb-3 border-b border-border">
-          <DialogTitle className="text-sm font-medium flex items-center gap-2">
-            <HardDrive className="w-4 h-4 text-muted-foreground" />
-            Mounts — {container.names[0] || container.shortId}
-          </DialogTitle>
-          <DialogDescription className="text-xs">Volume and bind mounts for this container</DialogDescription>
-        </DialogHeader>
-        <div className="h-[380px] overflow-y-auto">
-          {loading ? (
-            <div className="flex items-center justify-center gap-2 text-muted-foreground text-xs py-8">
-              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
-            </div>
-          ) : mounts.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-8">No mounts configured</p>
-          ) : (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border bg-muted/30">
-                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Type</th>
-                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Source</th>
-                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Destination</th>
-                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Mode</th>
-                  <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">RW</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mounts.map((m, i) => (
-                  <tr key={i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-2.5 font-mono text-foreground">{m.Type}</td>
-                    <td className="px-4 py-2.5 font-mono text-muted-foreground truncate max-w-[160px]" title={m.Source}>{m.Source || m.Name || "—"}</td>
-                    <td className="px-4 py-2.5 font-mono text-foreground truncate max-w-[160px]" title={m.Destination}>{m.Destination}</td>
-                    <td className="px-4 py-2.5 font-mono text-muted-foreground">{m.Mode || "—"}</td>
-                    <td className="px-4 py-2.5">
-                      <Badge variant="outline" className={`text-[10px] rounded-full px-2 py-0 font-mono ${m.RW ? "text-primary bg-primary/10 border-primary/20" : "text-muted-foreground bg-muted/40"}`}>
-                        {m.RW ? "rw" : "ro"}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+    <div
+      className="group relative bg-card border border-border rounded-2xl overflow-hidden cursor-pointer hover:border-primary/40 hover:shadow-md transition-all duration-200"
+      onClick={onClick}
+    >
+      {/* Status bar */}
+      <div className={`h-0.5 w-full ${running ? "bg-primary" : "bg-muted"}`} />
+
+      <div className="p-5">
+        {/* Top: logo + name + status */}
+        <div className="flex items-start gap-3 mb-4">
+          <div className={`p-2.5 rounded-xl border shrink-0 ${running ? "bg-[#2496ed]/10 border-[#2496ed]/20" : "bg-muted/60 border-border"}`}>
+            <DockerLogo className={`w-6 h-5 ${running ? "text-[#2496ed]" : "text-muted-foreground"}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-sm text-foreground leading-tight truncate">{name}</p>
+            <p className="font-mono text-[10px] text-muted-foreground truncate mt-0.5">{container.image}</p>
+          </div>
+          <Badge
+            variant="outline"
+            className={`text-[10px] font-mono uppercase rounded-full px-2 py-0 shrink-0 ${
+              running ? "text-primary bg-primary/10 border-primary/20" : "text-muted-foreground bg-muted/50 border-border"
+            }`}
+          >
+            {container.state}
+          </Badge>
+        </div>
+
+        {/* Stats */}
+        <div className="flex items-center justify-between mb-4">
+          <ContainerStats id={container.id} running={running} />
+          <span className="text-[10px] text-muted-foreground font-mono">{container.shortId}</span>
+        </div>
+
+        {/* Meta */}
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-[10px] text-muted-foreground">
+            Created {format(new Date(container.createdAt), "MMM dd, yyyy")}
+          </span>
+          {container.ports && container.ports.length > 0 && (
+            <>
+              <span className="text-muted-foreground/40 text-[10px]">·</span>
+              <span className="text-[10px] font-mono text-muted-foreground truncate">
+                {container.ports.slice(0, 2).map((p: any) => p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : `${p.PrivatePort}`).join(", ")}
+                {container.ports.length > 2 && ` +${container.ports.length - 2}`}
+              </span>
+            </>
           )}
         </div>
-        <div className="p-4 border-t border-border flex justify-end">
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Close</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
-// ── Container Terminal Dialog ─────────────────────────────────────────────────
-function TerminalDialog({ container, open, onClose }: { container: DockerContainer; open: boolean; onClose: () => void }) {
-  const [lines, setLines] = useState<string[]>([]);
-  const [input, setInput] = useState("");
-  const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const outputRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const socket = getSocket();
-
-  const appendOutput = useCallback((text: string) => {
-    const cleaned = stripAnsi(text);
-    setLines(prev => {
-      const all = (prev.join("\n") + cleaned).split("\n");
-      return all.slice(-500);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    setLines([]);
-    setError(null);
-    setConnected(false);
-
-    socket.emit("docker:exec:start", { containerId: container.id, rows: 40, cols: 120 });
-
-    const onReady = () => { setConnected(true); inputRef.current?.focus(); };
-    const onData = (data: string) => appendOutput(data);
-    const onExit = () => { setConnected(false); appendOutput("\n[Process exited]"); };
-    const onError = ({ message }: { message: string }) => { setError(message); setConnected(false); };
-
-    socket.on("docker:exec:ready", onReady);
-    socket.on("docker:exec:data", onData);
-    socket.on("docker:exec:exit", onExit);
-    socket.on("docker:exec:error", onError);
-
-    return () => {
-      socket.emit("docker:exec:stop");
-      socket.off("docker:exec:ready", onReady);
-      socket.off("docker:exec:data", onData);
-      socket.off("docker:exec:exit", onExit);
-      socket.off("docker:exec:error", onError);
-    };
-  }, [open, container.id]);
-
-  useEffect(() => {
-    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
-  }, [lines]);
-
-  function sendInput(e: React.FormEvent) {
-    e.preventDefault();
-    if (!connected) return;
-    socket.emit("docker:exec:input", input + "\n");
-    setInput("");
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-[760px] p-0 gap-0 overflow-hidden">
-        <DialogHeader className="p-4 pb-3 border-b border-border">
-          <DialogTitle className="text-sm font-medium flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-muted-foreground" />
-            Terminal — {container.names[0] || container.shortId}
-          </DialogTitle>
-          <DialogDescription className="text-xs mt-0.5">
-            {connected ? "Connected — type commands and press Enter" : error ? `Error: ${error}` : "Connecting…"}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div
-          ref={outputRef}
-          className="h-[380px] overflow-y-auto bg-[#0d0d0d] p-4 font-mono text-[12px] text-green-400 leading-relaxed cursor-text"
-          onClick={() => inputRef.current?.focus()}
-        >
-          {lines.map((line, i) => (
-            <div key={i} className="whitespace-pre-wrap break-all">{line}</div>
-          ))}
-          {!connected && !error && (
-            <div className="flex items-center gap-2 text-muted-foreground text-xs">
-              <Loader2 className="w-3 h-3 animate-spin" /> Connecting to container shell…
-            </div>
-          )}
-          {error && <div className="text-red-400 text-xs">{error}</div>}
-        </div>
-
-        <form onSubmit={sendInput} className="border-t border-border bg-[#111] flex items-center px-3 py-2 gap-2">
-          <span className="font-mono text-xs text-green-500 shrink-0">$</span>
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "c" && e.ctrlKey) { socket.emit("docker:exec:input", "\x03"); setInput(""); e.preventDefault(); }
-              if (e.key === "l" && e.ctrlKey) { setLines([]); e.preventDefault(); }
-            }}
-            className="flex-1 bg-transparent font-mono text-xs text-green-400 outline-none placeholder:text-muted-foreground/30"
-            placeholder={connected ? "Type a command…" : "Waiting for connection…"}
-            disabled={!connected}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <Button type="submit" size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground" disabled={!connected || !input.trim()}>
-            <Play className="w-3 h-3" />
+        {/* Action buttons */}
+        <div className="flex items-center gap-1.5 pt-3 border-t border-border/60" onClick={e => e.stopPropagation()}>
+          {busy === container.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground mr-1 shrink-0" />}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10"
+            disabled={running || busy === container.id}
+            title="Start"
+            onClick={e => onAction(container.id, dockerStart, "Start", e)}
+          >
+            <Play className="w-3.5 h-3.5" />
           </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10"
+            disabled={!running || busy === container.id}
+            title="Stop"
+            onClick={e => onAction(container.id, dockerStop, "Stop", e)}
+          >
+            <Square className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10"
+            disabled={busy === container.id}
+            title="Restart"
+            onClick={e => onAction(container.id, dockerRestart, "Restart", e)}
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            disabled={busy === container.id}
+            title="Remove"
+            onClick={e => onAction(container.id, dockerRemove, "Remove", e)}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+          <div className="flex-1" />
+          <span className="text-[10px] text-muted-foreground group-hover:text-primary transition-colors">Open →</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
-// ── Three-dot menu ────────────────────────────────────────────────────────────
-type DialogType = "logs" | "network" | "mounts" | "terminal" | "env" | "scheduler" | "domain" | "backup" | null;
-
-function ContainerMenu({ container, onSelect }: { container: DockerContainer; onSelect: (type: DialogType) => void }) {
+// ── Stat summary card ─────────────────────────────────────────────────────────
+function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground">
-          <MoreHorizontal className="w-4 h-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-lg">
-        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("logs")}>
-          <FileText className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="flex-1">View Logs</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("network")}>
-          <Network className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="flex-1">View Network</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("mounts")}>
-          <HardDrive className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="flex-1">View Mounts</span>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("terminal")} disabled={container.state !== "running"}>
-          <Terminal className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="flex-1">Open Terminal</span>
-          {container.state !== "running" && <span className="text-[10px] text-muted-foreground">offline</span>}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("env")}>
-          <KeyRound className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="flex-1">Environment Vars</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("scheduler")}>
-          <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="flex-1">Scheduler</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("domain")}>
-          <Globe className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="flex-1">Domain</span>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="px-2.5 py-2 rounded-lg cursor-pointer gap-2.5 text-xs" onClick={() => onSelect("backup")}>
-          <HardDrive className="w-3.5 h-3.5 text-amber-500" />
-          <span className="flex-1">Backups</span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Card className="bg-background border-border shadow-none rounded-xl">
+      <CardContent className="p-5">
+        <p className="text-xs font-medium text-muted-foreground tracking-wide mb-2">{label}</p>
+        <p className="text-2xl font-normal tracking-tight text-foreground">{value}</p>
+      </CardContent>
+    </Card>
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function DockerPage() {
   const { theme, toggle } = useTheme();
+  const [, navigate] = useLocation();
   const qc = useQueryClient();
   const { data: status } = useGetDockerStatus();
   const { data: containersData, isLoading } = useGetDockerContainers();
   const [bulkAction, setBulkAction] = useState<"start" | "stop" | "restart" | "remove" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [activeContainer, setActiveContainer] = useState<DockerContainer | null>(null);
-  const [activeDialog, setActiveDialog] = useState<DialogType>(null);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["docker-containers"] });
     qc.invalidateQueries({ queryKey: ["docker-status"] });
   };
 
-  function openDialog(container: DockerContainer, type: DialogType) {
-    if (type === "backup" && !isDbContainer(container.image)) {
-      toast.warning("Backups are only available for database containers (PostgreSQL, MySQL, MariaDB, MongoDB).", { duration: 4000 });
-      return;
-    }
-    setActiveContainer(container);
-    setActiveDialog(type);
-  }
-
-  function closeDialog() {
-    setActiveDialog(null);
-    setActiveContainer(null);
-  }
-
-  async function action(id: string, fn: (id: string) => Promise<void>, label: string) {
+  async function action(id: string, fn: (id: string) => Promise<void>, label: string, e: React.MouseEvent) {
+    e.stopPropagation();
     setBusy(id);
-    try {
-      await fn(id);
-      toast.success(`${label} succeeded`);
-      refresh();
-    } catch (err: any) {
-      toast.error(err.message || `${label} failed`);
-    } finally {
-      setBusy(null);
-    }
+    try { await fn(id); toast.success(`${label} succeeded`); refresh(); }
+    catch (err: any) { toast.error(err.message || `${label} failed`); }
+    finally { setBusy(null); }
   }
 
   async function runBulk() {
@@ -527,11 +264,8 @@ export default function DockerPage() {
       if (failed) toast.warning(`${bulkAction} completed with ${failed} failure(s)`);
       else toast.success(`Bulk ${bulkAction} succeeded`);
       refresh();
-    } catch (err: any) {
-      toast.error(err.message || "Bulk action failed");
-    } finally {
-      setBulkAction(null);
-    }
+    } catch (err: any) { toast.error(err.message || "Bulk action failed"); }
+    finally { setBulkAction(null); }
   }
 
   const containers = containersData?.containers || [];
@@ -542,14 +276,14 @@ export default function DockerPage() {
       <DesktopSidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border">
-          <div className="px-4 h-18 flex items-center justify-between">
+          <div className="px-4 h-14 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <MobileSidebarTrigger />
               <div className="hidden lg:flex items-center gap-3">
-                <div className="p-1 rounded bg-primary/10 border border-primary/20 shrink-0">
-                  <Container className="w-4 h-4 text-primary" />
+                <div className="p-1.5 rounded-lg bg-[#2496ed]/10 border border-[#2496ed]/20 shrink-0">
+                  <DockerLogo className="w-5 h-4 text-[#2496ed]" />
                 </div>
-                <span className="font-medium text-sm tracking-tight text-foreground">Docker Manager</span>
+                <span className="font-medium text-sm tracking-tight">Docker Manager</span>
                 {status?.available && (
                   <Badge variant="outline" className="font-mono text-[10px] uppercase rounded-full px-2 py-0 text-primary bg-primary/10 border-primary/20">
                     {status.serverVersion}
@@ -558,7 +292,7 @@ export default function DockerPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60" onClick={toggle}>
+              <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground" onClick={toggle}>
                 {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </Button>
               <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={refresh}>
@@ -572,7 +306,7 @@ export default function DockerPage() {
           <div className="flex flex-col gap-2 mb-4">
             <h1 className="text-4xl sm:text-5xl font-normal tracking-tight text-foreground leading-none">Docker Manager</h1>
             <p className="text-muted-foreground text-sm max-w-xl leading-relaxed">
-              Manage containers running on the host: start, stop, restart, or remove containers individually or in bulk.
+              Manage containers running on the host. Click a card to open its detail page.
             </p>
           </div>
 
@@ -580,9 +314,9 @@ export default function DockerPage() {
             <Card className="bg-amber-500/10 border-amber-500/30 shadow-none rounded-xl">
               <CardContent className="p-4 flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                <div className="flex-1 text-sm">
-                  <p className="font-medium text-foreground mb-1">Docker is not available</p>
-                  <p className="text-xs text-muted-foreground">{status?.reason || "The Docker socket is not reachable. Install Docker on your VPS to enable this feature."}</p>
+                <div>
+                  <p className="font-medium text-foreground text-sm mb-1">Docker is not available</p>
+                  <p className="text-xs text-muted-foreground">{status?.reason || "The Docker socket is not reachable."}</p>
                 </div>
               </CardContent>
             </Card>
@@ -597,90 +331,69 @@ export default function DockerPage() {
             </div>
           )}
 
+          {/* Bulk Actions */}
           <Card className="bg-background border-border shadow-none rounded-xl">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-medium tracking-tight">Bulk Actions</CardTitle>
               <CardDescription className="text-xs text-muted-foreground">Apply an action to all containers at once.</CardDescription>
             </CardHeader>
             <CardContent className="p-4 pt-2 flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("start")}><Play className="w-3.5 h-3.5 mr-1" />Start All</Button>
-              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("stop")}><Square className="w-3.5 h-3.5 mr-1" />Stop All</Button>
-              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("restart")}><RotateCw className="w-3.5 h-3.5 mr-1" />Restart All</Button>
-              <Button variant="destructive" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("remove")}><Trash2 className="w-3.5 h-3.5 mr-1" />Remove All</Button>
+              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("start")}><Play className="w-3.5 h-3.5 mr-1.5" />Start All</Button>
+              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("stop")}><Square className="w-3.5 h-3.5 mr-1.5" />Stop All</Button>
+              <Button variant="outline" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("restart")}><RotateCw className="w-3.5 h-3.5 mr-1.5" />Restart All</Button>
+              <Button variant="destructive" size="sm" disabled={!dockerOk} onClick={() => setBulkAction("remove")}><Trash2 className="w-3.5 h-3.5 mr-1.5" />Remove All</Button>
             </CardContent>
           </Card>
 
-          <Card className="bg-background border-border shadow-none rounded-xl overflow-hidden">
-            <CardHeader className="p-4 pb-3 border-b border-border/50">
-              <CardTitle className="text-sm font-medium tracking-tight">Containers</CardTitle>
-            </CardHeader>
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-xs font-medium text-muted-foreground px-6">NAME</TableHead>
-                  <TableHead className="text-xs font-medium text-muted-foreground px-6">IMAGE</TableHead>
-                  <TableHead className="text-xs font-medium text-muted-foreground px-6">STATE</TableHead>
-                  <TableHead className="text-xs font-medium text-muted-foreground px-6">METRICS</TableHead>
-                  <TableHead className="text-xs font-medium text-muted-foreground px-6">CREATED</TableHead>
-                  <TableHead className="text-xs font-medium text-muted-foreground px-6 text-right">ACTIONS</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  Array.from({ length: 4 }).map((_, i) => (
-                    <TableRow key={i}><TableCell colSpan={6} className="px-6"><Skeleton className="h-4 w-full bg-muted" /></TableCell></TableRow>
-                  ))
-                ) : containers.length === 0 ? (
-                  <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">{dockerOk ? "No containers" : "Docker is not available."}</TableCell></TableRow>
-                ) : (
-                  containers.map((c) => (
-                    <TableRow key={c.id} className="border-border hover:bg-muted/30 transition-colors">
-                      <TableCell className="font-mono text-xs text-foreground px-6 truncate">{c.names[0] || c.shortId}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground px-6 truncate">{c.image}</TableCell>
-                      <TableCell className="px-6">
-                        <Badge variant="outline" className={`font-mono text-[10px] uppercase rounded-full px-2 py-0 ${c.state === 'running' ? 'text-primary bg-primary/10 border-primary/20' : 'text-muted-foreground bg-muted/50'}`}>
-                          {c.state}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="px-6">
-                        <ContainerStatsCell id={c.id} running={c.state === 'running'} />
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground px-6 whitespace-nowrap">{format(new Date(c.createdAt), "MMM dd, HH:mm")}</TableCell>
-                      <TableCell className="px-6 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {busy === c.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground mr-1" />}
-                          <Button variant="ghost" size="icon" className="h-7 w-7" disabled={c.state === 'running' || busy === c.id} title="Start" onClick={() => action(c.id, dockerStart, "Start")}>
-                            <Play className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" disabled={c.state !== 'running' || busy === c.id} title="Stop" onClick={() => action(c.id, dockerStop, "Stop")}>
-                            <Square className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" disabled={busy === c.id} title="Restart" onClick={() => action(c.id, dockerRestart, "Restart")}>
-                            <RotateCw className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" disabled={busy === c.id} title="Remove" onClick={() => action(c.id, dockerRemove, "Remove")}>
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                          <ContainerMenu container={c} onSelect={(type) => openDialog(c, type)} />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </Card>
+          {/* Container Cards */}
+          <div>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-4">
+              Containers {!isLoading && `(${containers.length})`}
+            </h2>
+            {isLoading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="rounded-2xl border border-border p-5 space-y-4">
+                    <div className="flex items-start gap-3">
+                      <Skeleton className="w-10 h-10 rounded-xl bg-muted" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-3/4 bg-muted" />
+                        <Skeleton className="h-3 w-full bg-muted" />
+                      </div>
+                    </div>
+                    <Skeleton className="h-3 w-1/2 bg-muted" />
+                    <Skeleton className="h-8 w-full bg-muted rounded-lg" />
+                  </div>
+                ))}
+              </div>
+            ) : containers.length === 0 ? (
+              <div className="rounded-2xl border border-border border-dashed p-12 text-center">
+                <DockerLogo className="w-10 h-8 text-muted-foreground/40 mx-auto mb-4" />
+                <p className="text-sm text-muted-foreground">{dockerOk ? "No containers found" : "Docker is not available."}</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {containers.map(c => (
+                  <ContainerCard
+                    key={c.id}
+                    container={c}
+                    busy={busy}
+                    onAction={action}
+                    onClick={() => navigate(`/docker/${c.id}`)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </main>
       </div>
 
       {/* Bulk confirm */}
-      <AlertDialog open={!!bulkAction} onOpenChange={(o) => { if (!o) setBulkAction(null); }}>
+      <AlertDialog open={!!bulkAction} onOpenChange={o => { if (!o) setBulkAction(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm bulk {bulkAction}</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will {bulkAction} <span className="font-semibold">all</span> containers on the host. Continue?
-            </AlertDialogDescription>
+            <AlertDialogDescription>This will {bulkAction} <span className="font-semibold">all</span> containers on the host. Continue?</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -688,59 +401,6 @@ export default function DockerPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Contextual dialogs */}
-      {activeContainer && activeDialog === "logs" && (
-        <LogsDialog container={activeContainer} open={true} onClose={closeDialog} />
-      )}
-      {activeContainer && activeDialog === "network" && (
-        <NetworkDialog container={activeContainer} open={true} onClose={closeDialog} />
-      )}
-      {activeContainer && activeDialog === "mounts" && (
-        <MountsDialog container={activeContainer} open={true} onClose={closeDialog} />
-      )}
-      {activeContainer && activeDialog === "terminal" && (
-        <TerminalDialog container={activeContainer} open={true} onClose={closeDialog} />
-      )}
-      {activeContainer && activeDialog === "env" && (
-        <EnvVarsDialog
-          containerName={(activeContainer.names[0] || activeContainer.shortId).replace(/^\//, "")}
-          open={true}
-          onClose={closeDialog}
-        />
-      )}
-      {activeContainer && activeDialog === "scheduler" && (
-        <SchedulerDialog
-          containerName={(activeContainer.names[0] || activeContainer.shortId).replace(/^\//, "")}
-          open={true}
-          onClose={closeDialog}
-        />
-      )}
-      {activeContainer && activeDialog === "domain" && (
-        <DomainDialog
-          containerName={(activeContainer.names[0] || activeContainer.shortId).replace(/^\//, "")}
-          open={true}
-          onClose={closeDialog}
-        />
-      )}
-      {activeContainer && activeDialog === "backup" && (
-        <BackupDialog
-          containerName={(activeContainer.names[0] || activeContainer.shortId).replace(/^\//, "")}
-          open={true}
-          onClose={closeDialog}
-        />
-      )}
     </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <Card className="bg-background border-border shadow-none rounded-lg">
-      <CardContent className="p-5">
-        <p className="text-xs font-medium text-muted-foreground tracking-wide mb-2">{label}</p>
-        <p className="text-2xl font-normal tracking-tight text-foreground">{value}</p>
-      </CardContent>
-    </Card>
   );
 }
