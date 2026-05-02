@@ -1074,3 +1074,15 @@ export async function agentInstallDocker(agentId: string): Promise<{
 }> {
   return apiFetch("/agent/install-docker", { method: "POST", body: JSON.stringify({ agentId }) });
 }
+
+// ── AI SQL Generator ───────────────────────────────────────────────────────────
+
+export async function aiGenerateSql(prompt: string, schema?: string): Promise<{
+  query: string;
+  explanation: string;
+  readOnly: boolean;
+  operationType: string;
+  warning: string | null;
+}> {
+  return apiFetch("/terminal/ai/sql", { method: "POST", body: JSON.stringify({ prompt, schema }) });
+}

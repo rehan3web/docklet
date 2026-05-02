@@ -379,6 +379,102 @@ router.post('/ai/analyze', authenticateToken, async (req, res) => {
     }
 });
 
+// ── AI SQL Generator ──────────────────────────────────────────────────────────
+
+const SQL_GEN_SYSTEM = `You are an expert PostgreSQL query generator embedded in a SQL editor inside Docklet.
+
+Given a plain-English description, generate a valid PostgreSQL query.
+
+RULES:
+- Output ONLY a valid JSON object — no markdown, no fences, no commentary outside JSON.
+- Use standard PostgreSQL syntax.
+- For destructive operations (INSERT/UPDATE/DELETE/DROP/TRUNCATE/ALTER/CREATE/GRANT/REVOKE/COPY), set "readOnly": false.
+- For SELECT, EXPLAIN, SHOW, or other read-only operations, set "readOnly": true.
+- If the prompt is ambiguous about table/column names, use sensible placeholder names and note them in the explanation.
+- Keep queries safe: avoid unbounded DELETEs or DROPs unless explicitly requested.
+
+Response JSON shape:
+{
+  "query": "SELECT * FROM users LIMIT 10;",
+  "explanation": "Fetches the first 10 rows from the users table.",
+  "readOnly": true,
+  "operationType": "SELECT",
+  "warning": null
+}
+
+"warning" should be a short string if the query is risky (e.g. "This will delete all rows in the table."), or null if safe.`;
+
+router.post('/ai/sql', authenticateToken, async (req, res) => {
+    const { prompt, schema } = req.body || {};
+    if (!prompt || typeof prompt !== 'string') {
+        return res.status(400).json({ message: 'A prompt is required.' });
+    }
+
+    const apiKey = await getSetting('nvidia_api_key');
+    if (!apiKey) {
+        return res.status(400).json({
+            configured: false,
+            message: 'AI is not configured. Go to the AI page to set up your API key.',
+        });
+    }
+    const model = (await getSetting('nvidia_model')) || NVIDIA_DEFAULT_MODEL;
+
+    try {
+        const openai = new OpenAI({ apiKey, baseURL: NVIDIA_BASE_URL });
+
+        const userContent = schema
+            ? `Database schema:\n${schema}\n\nUser request: ${prompt}`
+            : `User request: ${prompt}`;
+
+        const completion = await openai.chat.completions.create({
+            model,
+            messages: [
+                { role: 'system', content: SQL_GEN_SYSTEM },
+                { role: 'user', content: userContent },
+            ],
+            temperature: 0.1,
+            max_tokens: 1024,
+        });
+
+        const raw = (completion.choices?.[0]?.message?.content || '').trim();
+        const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+
+        let parsed: any;
+        try {
+            parsed = JSON.parse(cleaned);
+        } catch {
+            // Fallback: treat raw output as the query
+            parsed = {
+                query: cleaned,
+                explanation: 'AI generated this query from your description.',
+                readOnly: cleaned.trim().toUpperCase().startsWith('SELECT'),
+                operationType: 'UNKNOWN',
+                warning: null,
+            };
+        }
+
+        res.json({
+            query: parsed.query || '',
+            explanation: parsed.explanation || '',
+            readOnly: parsed.readOnly !== false,
+            operationType: parsed.operationType || 'UNKNOWN',
+            warning: parsed.warning || null,
+        });
+    } catch (err: any) {
+        const upstreamStatus: number = err?.status || 500;
+        let clientStatus: number;
+        let message: string;
+        if (upstreamStatus === 401 || upstreamStatus === 403) {
+            clientStatus = 400;
+            message = 'AI API key is invalid or expired. Go to the AI page to update it.';
+        } else {
+            clientStatus = upstreamStatus >= 100 && upstreamStatus < 600 ? upstreamStatus : 500;
+            message = err?.message || 'Failed to reach AI';
+        }
+        res.status(clientStatus).json({ message });
+    }
+});
+
 // ── AI Chat ───────────────────────────────────────────────────────────────────
 
 router.post('/ai/chat', authenticateToken, async (req, res) => {
