@@ -242,35 +242,13 @@ ENVIRONMENT CONSTRAINTS (this host is a shared/containerized Linux environment):
 - Elasticsearch/OpenSearch: set -e "discovery.type=single-node" and -e "xpack.security.enabled=false" instead of kernel tweaks.
 - If a previous attempt failed with "not allowed", "operation not permitted", or "invalid argument" for a flag, OMIT that flag entirely — do not retry it.
 
-PER-SERVICE INSTALL RECIPES (always use these exact patterns):
-- Redis:      docker run -d --name redis --restart=unless-stopped -p 6379:6379 redis:7-alpine --loglevel warning
-              Verify: docker exec redis redis-cli ping  (expect: PONG)
-- MySQL:      docker run -d --name mysql --restart=unless-stopped -p 3306:3306 -e MYSQL_ROOT_PASSWORD=<password> mysql:8
-              Wait 15s before verify. Verify: docker exec mysql mysqladmin -uroot -p<password> ping
-              NEVER use mysqladmin status for health check — use ping.
-- PostgreSQL: docker run -d --name postgres --restart=unless-stopped -p 5432:5432 -e POSTGRES_PASSWORD=<password> postgres:16-alpine
-              Wait 5s. Verify: docker exec postgres pg_isready -U postgres
-- MongoDB:    docker run -d --name mongodb --restart=unless-stopped -p 27017:27017 mongo:7
-              Wait 5s. Verify: docker exec mongodb mongosh --eval "db.runCommand({ping:1})" --quiet
-- Nginx:      docker run -d --name nginx --restart=unless-stopped -p 80:80 -p 443:443 nginx:alpine
-              Verify: docker exec nginx nginx -t
-- RabbitMQ:   docker run -d --name rabbitmq --restart=unless-stopped -p 5672:5672 -p 15672:15672 rabbitmq:3-management-alpine
-              Wait 10s. Verify: docker exec rabbitmq rabbitmq-diagnostics -q ping
-- Memcached:  docker run -d --name memcached --restart=unless-stopped -p 11211:11211 memcached:alpine
-- MariaDB:    docker run -d --name mariadb --restart=unless-stopped -p 3306:3306 -e MYSQL_ROOT_PASSWORD=<password> mariadb:11
-              Wait 10s. Verify: docker exec mariadb mysqladmin -uroot -p<password> ping
-- Valkey:     docker run -d --name valkey --restart=unless-stopped -p 6379:6379 valkey/valkey:alpine --loglevel warning
-              Verify: docker exec valkey valkey-cli ping
-- Minio:      docker run -d --name minio --restart=unless-stopped -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=admin -e MINIO_ROOT_PASSWORD=<password> minio/minio server /data --console-address ":9001"
-- Gitea:      docker run -d --name gitea --restart=unless-stopped -p 3000:3000 -p 222:22 gitea/gitea:latest
-- WordPress:  docker run -d --name wordpress --restart=unless-stopped -p 8080:80 -e WORDPRESS_DB_HOST=mysql -e WORDPRESS_DB_USER=root -e WORDPRESS_DB_PASSWORD=<password> -e WORDPRESS_DB_NAME=wordpress wordpress:latest
-- Grafana:    docker run -d --name grafana --restart=unless-stopped -p 3000:3000 grafana/grafana:latest
-- InfluxDB:   docker run -d --name influxdb --restart=unless-stopped -p 8086:8086 influxdb:2
-- Prometheus: docker run -d --name prometheus --restart=unless-stopped -p 9090:9090 prom/prometheus:latest
-- n8n:        docker run -d --name n8n --restart=unless-stopped -p 5678:5678 n8nio/n8n:latest
-- Uptime Kuma: docker run -d --name uptime-kuma --restart=unless-stopped -p 3001:3001 louislam/uptime-kuma:1
-
-For any service not listed above, use the official Docker Hub image with sensible defaults (latest stable tag, standard port, --restart=unless-stopped, -d).
+DOCKER IMAGE SELECTION (fully dynamic — no hardcoded list):
+- The user context will include a DOCKER HUB SEARCH RESULTS section with live results fetched from Docker Hub for the requested service.
+- Use the [OFFICIAL] image when available — it is the safest, best-maintained choice.
+- Pick the most relevant image from the search results based on star count and description.
+- Choose a stable tag (e.g. ":alpine", ":8", ":16-alpine") over ":latest" when it is obvious from the image name.
+- Use the EXACT image name from the search results — do not guess or invent image names.
+- If no search results are provided, use the well-known official Docker Hub name for the service.
 
 DOMAIN & SSL AUTOMATION:
 - You receive a DOMAIN CONTEXT with two sections:
@@ -361,10 +339,71 @@ function makeOpenAI(apiKey: string): OpenAI {
     return new OpenAI({ apiKey, baseURL: NVIDIA_BASE_URL });
 }
 
+// ── Docker Hub live search ────────────────────────────────────────────────────
+
+/**
+ * Extracts the primary service name(s) from an install request.
+ * Returns an empty array if this doesn't look like an install request.
+ */
+function extractServiceNames(message: string): string[] {
+    const installIntent = /\b(install|deploy|start|run|setup|set up|add|launch|create|spin up|bring up)\b/i;
+    if (!installIntent.test(message)) return [];
+
+    const stopwords = new Set([
+        'a', 'an', 'the', 'on', 'in', 'at', 'with', 'for', 'and', 'or', 'of',
+        'server', 'service', 'instance', 'container', 'docker', 'it', 'this', 'my',
+        'port', 'using', 'latest', 'version', 'default', 'password', 'root', 'me',
+        'please', 'install', 'deploy', 'start', 'run', 'setup', 'add', 'launch',
+        'create', 'spin', 'up', 'bring', 'set', 'new', 'latest', 'stable',
+    ]);
+
+    const words = message.toLowerCase()
+        .replace(/[^a-z0-9\s\-]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 2 && !stopwords.has(w));
+
+    // Return up to 2 unique candidates
+    return [...new Set(words)].slice(0, 2);
+}
+
+/**
+ * Searches Docker Hub for the given query and returns a formatted string
+ * with the top results (name, official badge, star count, description).
+ */
+async function searchDockerHub(query: string): Promise<string> {
+    try {
+        const url = `https://hub.docker.com/v2/search/repositories/?query=${encodeURIComponent(query)}&page_size=6`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+        if (!res.ok) return 'Docker Hub search unavailable.';
+        const data = await res.json() as any;
+        const items: any[] = data.results || [];
+        if (!items.length) return `No images found on Docker Hub for "${query}".`;
+        return items.map((r: any) => {
+            const name     = r.repo_name || r.name || '?';
+            const stars    = r.star_count ?? 0;
+            const official = r.is_official ? ' [OFFICIAL]' : '';
+            const desc     = (r.short_description || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+            return `  ${name}${official} ★${stars}${desc ? ' — ' + desc : ''}`;
+        }).join('\n');
+    } catch {
+        return 'Docker Hub search unavailable.';
+    }
+}
+
 async function planWithAI(message: string, apiKey: string, model: string): Promise<ActionPlan> {
-    const context      = isDockerAvailable() ? getDockerContext() : 'Docker is not available.';
-    const domainCtx    = await getDomainContext();
-    const userPrompt   = `LIVE DOCKER CONTEXT:\n${context}\n\nDOMAIN CONTEXT:\n${domainCtx}\n\nUSER REQUEST: ${message}`;
+    const context   = isDockerAvailable() ? getDockerContext() : 'Docker is not available.';
+    const domainCtx = await getDomainContext();
+
+    // Live Docker Hub search for install requests
+    let hubSection = '';
+    const serviceNames = extractServiceNames(message);
+    if (serviceNames.length > 0) {
+        const results = await Promise.all(serviceNames.map(s => searchDockerHub(s)));
+        const parts = serviceNames.map((s, i) => `Search: "${s}"\n${results[i]}`).join('\n\n');
+        hubSection = `\n\nDOCKER HUB SEARCH RESULTS (use these image names — do not guess):\n${parts}`;
+    }
+
+    const userPrompt = `LIVE DOCKER CONTEXT:\n${context}\n\nDOMAIN CONTEXT:\n${domainCtx}${hubSection}\n\nUSER REQUEST: ${message}`;
 
     const res = await makeOpenAI(apiKey).chat.completions.create({
         model,
