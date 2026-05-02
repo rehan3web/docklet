@@ -242,6 +242,36 @@ ENVIRONMENT CONSTRAINTS (this host is a shared/containerized Linux environment):
 - Elasticsearch/OpenSearch: set -e "discovery.type=single-node" and -e "xpack.security.enabled=false" instead of kernel tweaks.
 - If a previous attempt failed with "not allowed", "operation not permitted", or "invalid argument" for a flag, OMIT that flag entirely — do not retry it.
 
+PER-SERVICE INSTALL RECIPES (always use these exact patterns):
+- Redis:      docker run -d --name redis --restart=unless-stopped -p 6379:6379 redis:7-alpine --loglevel warning
+              Verify: docker exec redis redis-cli ping  (expect: PONG)
+- MySQL:      docker run -d --name mysql --restart=unless-stopped -p 3306:3306 -e MYSQL_ROOT_PASSWORD=<password> mysql:8
+              Wait 15s before verify. Verify: docker exec mysql mysqladmin -uroot -p<password> ping
+              NEVER use mysqladmin status for health check — use ping.
+- PostgreSQL: docker run -d --name postgres --restart=unless-stopped -p 5432:5432 -e POSTGRES_PASSWORD=<password> postgres:16-alpine
+              Wait 5s. Verify: docker exec postgres pg_isready -U postgres
+- MongoDB:    docker run -d --name mongodb --restart=unless-stopped -p 27017:27017 mongo:7
+              Wait 5s. Verify: docker exec mongodb mongosh --eval "db.runCommand({ping:1})" --quiet
+- Nginx:      docker run -d --name nginx --restart=unless-stopped -p 80:80 -p 443:443 nginx:alpine
+              Verify: docker exec nginx nginx -t
+- RabbitMQ:   docker run -d --name rabbitmq --restart=unless-stopped -p 5672:5672 -p 15672:15672 rabbitmq:3-management-alpine
+              Wait 10s. Verify: docker exec rabbitmq rabbitmq-diagnostics -q ping
+- Memcached:  docker run -d --name memcached --restart=unless-stopped -p 11211:11211 memcached:alpine
+- MariaDB:    docker run -d --name mariadb --restart=unless-stopped -p 3306:3306 -e MYSQL_ROOT_PASSWORD=<password> mariadb:11
+              Wait 10s. Verify: docker exec mariadb mysqladmin -uroot -p<password> ping
+- Valkey:     docker run -d --name valkey --restart=unless-stopped -p 6379:6379 valkey/valkey:alpine --loglevel warning
+              Verify: docker exec valkey valkey-cli ping
+- Minio:      docker run -d --name minio --restart=unless-stopped -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=admin -e MINIO_ROOT_PASSWORD=<password> minio/minio server /data --console-address ":9001"
+- Gitea:      docker run -d --name gitea --restart=unless-stopped -p 3000:3000 -p 222:22 gitea/gitea:latest
+- WordPress:  docker run -d --name wordpress --restart=unless-stopped -p 8080:80 -e WORDPRESS_DB_HOST=mysql -e WORDPRESS_DB_USER=root -e WORDPRESS_DB_PASSWORD=<password> -e WORDPRESS_DB_NAME=wordpress wordpress:latest
+- Grafana:    docker run -d --name grafana --restart=unless-stopped -p 3000:3000 grafana/grafana:latest
+- InfluxDB:   docker run -d --name influxdb --restart=unless-stopped -p 8086:8086 influxdb:2
+- Prometheus: docker run -d --name prometheus --restart=unless-stopped -p 9090:9090 prom/prometheus:latest
+- n8n:        docker run -d --name n8n --restart=unless-stopped -p 5678:5678 n8nio/n8n:latest
+- Uptime Kuma: docker run -d --name uptime-kuma --restart=unless-stopped -p 3001:3001 louislam/uptime-kuma:1
+
+For any service not listed above, use the official Docker Hub image with sensible defaults (latest stable tag, standard port, --restart=unless-stopped, -d).
+
 DOMAIN & SSL AUTOMATION:
 - You receive a DOMAIN CONTEXT with two sections:
   A) "Verified base domains" — base domains whose wildcard A record (* → IP) is confirmed. Every subdomain of these automatically resolves — no extra DNS step needed.
@@ -855,105 +885,6 @@ async function tryDomainConnect(
     return true;
 }
 
-// ── Known-service direct install intercept ────────────────────────────────────
-
-/** Service definitions: pattern to detect + hardcoded docker_run args */
-const KNOWN_SERVICES: Array<{
-    pattern: RegExp;
-    name: string;
-    makeSteps: (msg: string) => AgentStep[];
-}> = [
-    {
-        name: 'Redis',
-        pattern: /\bredis\b/i,
-        makeSteps: () => [
-            {
-                type: 'docker_free_port',
-                port: 6379,
-                description: 'Free port 6379 if in use',
-            },
-            {
-                type: 'docker_run',
-                args: [
-                    '-d', '--name', 'redis',
-                    '--restart=unless-stopped',
-                    '-p', '6379:6379',
-                    'redis:7-alpine',
-                    '--loglevel', 'warning',
-                ],
-                description: 'Start Redis 7 on port 6379',
-            },
-            {
-                type: 'wait',
-                ms: 2000,
-                description: 'Wait for Redis to initialise',
-            },
-            {
-                type: 'docker_exec',
-                container: 'redis',
-                command: 'redis-cli ping',
-                description: 'Verify Redis is responding',
-                continueOnError: true,
-            },
-        ],
-    },
-];
-
-/**
- * If the message is a known-service install request, run the hardcoded steps
- * directly without going through the AI planner. Returns true if handled.
- */
-async function tryServiceInstall(
-    userId: string, agentId: string, message: string
-): Promise<boolean> {
-    const isInstall = /\b(install|deploy|start|run|setup|set up|add|launch|create)\b/i.test(message);
-    if (!isInstall) return false;
-
-    for (const svc of KNOWN_SERVICES) {
-        if (!svc.pattern.test(message)) continue;
-
-        emitToUser(userId, 'agent:log', {
-            agentId, type: 'ai',
-            content: `Installing **${svc.name}** directly…`,
-        });
-
-        // Check if already running
-        try {
-            const out = execSync(
-                `docker ps --filter "name=${svc.name.toLowerCase()}" --filter "status=running" --format "{{.Names}}"`,
-                { stdio: 'pipe', timeout: 5_000 }
-            ).toString().trim();
-            if (out) {
-                emitToUser(userId, 'agent:log', {
-                    agentId, type: 'ai',
-                    content: `✓ **${svc.name}** is already running (container: \`${out}\`).`,
-                });
-                emitToUser(userId, 'agent:done', { agentId, success: true, summary: `${svc.name} already running` });
-                return true;
-            }
-        } catch { /* ignore — docker might not be available in dev */ }
-
-        const steps = svc.makeSteps(message);
-        const result = await executeSteps(steps, userId, agentId);
-
-        if (result.failed) {
-            emitToUser(userId, 'agent:log', {
-                agentId, type: 'error',
-                content: `**${svc.name}** installation failed. Check the output above for details.`,
-            });
-            emitToUser(userId, 'agent:done', { agentId, success: false, summary: `${svc.name} install failed` });
-        } else {
-            emitToUser(userId, 'agent:log', {
-                agentId, type: 'ai',
-                content: `✓ **${svc.name}** is running on port ${steps.find((s: AgentStep) => s.type === 'docker_run' && (s as any).args?.includes('6379:6379')) ? '6379' : 'the configured port'}.`,
-            });
-            emitToUser(userId, 'agent:done', { agentId, success: true, summary: `${svc.name} installed` });
-        }
-        return true;
-    }
-    return false;
-}
-
 // ── ReAct loop (Plan → Execute → Verify → Fix → Verify …) ────────────────────
 
 async function runAgentLoop(
@@ -984,10 +915,6 @@ async function runAgentLoop(
     // ── Fast path: domain-connect request (no AI planning needed) ──────────
     const handled = await tryDomainConnect(userId, agentId, message);
     if (handled) return;
-
-    // ── Fast path: known-service install (Redis, etc.) ───────────────────
-    const serviceHandled = await tryServiceInstall(userId, agentId, message);
-    if (serviceHandled) return;
 
     // ── Phase 1: Plan ──────────────────────────────────────────────────────
     emitToUser(userId, 'agent:log', {

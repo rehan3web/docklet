@@ -47,6 +47,12 @@ const AGENT_PROMPTS = [
   { icon: <Container className="w-4 h-4" />, label: "Install MongoDB",    prompt: "Install MongoDB" },
   { icon: <Server className="w-4 h-4" />,    label: "Install MySQL",      prompt: "Install MySQL with root password 'root'" },
   { icon: <Download className="w-4 h-4" />,  label: "Install RabbitMQ",   prompt: "Install RabbitMQ message broker" },
+  { icon: <Database className="w-4 h-4" />,  label: "Install MariaDB",    prompt: "Install MariaDB with root password 'root'" },
+  { icon: <Server className="w-4 h-4" />,    label: "Install Grafana",    prompt: "Install Grafana on port 3000" },
+  { icon: <Package className="w-4 h-4" />,   label: "Install Memcached",  prompt: "Install Memcached" },
+  { icon: <Globe className="w-4 h-4" />,     label: "Install MinIO",      prompt: "Install MinIO object storage with admin password 'minioadmin'" },
+  { icon: <Container className="w-4 h-4" />, label: "Install n8n",        prompt: "Install n8n workflow automation on port 5678" },
+  { icon: <Server className="w-4 h-4" />,    label: "Install Prometheus", prompt: "Install Prometheus monitoring on port 9090" },
 ];
 
 const CHAT_PROMPTS = [
