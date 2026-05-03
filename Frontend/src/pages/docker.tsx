@@ -198,7 +198,7 @@ type DbDef = {
 const CDN = "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons";
 
 const DB_CATALOG: DbDef[] = [
-  { id: "postgres", name: "PostgreSQL", version: "16", image: "postgres:16", logoUrl: `${CDN}/postgresql/postgresql-original.svg`, hasAdminPanel: true, defaultPort: "5432", fields: [
+  { id: "postgres", name: "PostgreSQL", version: "16", image: "postgres:16", logoUrl: `${CDN}/postgresql/postgresql-original.svg`, defaultPort: "5432", fields: [
     { key: "POSTGRES_DB", label: "Database", default: "mydb" },
     { key: "POSTGRES_USER", label: "Username", default: "postgres" },
     { key: "POSTGRES_PASSWORD", label: "Password", default: "postgres", password: true },
@@ -209,7 +209,7 @@ const DB_CATALOG: DbDef[] = [
     { key: "MYSQL_USER", label: "User", default: "myuser" },
     { key: "MYSQL_PASSWORD", label: "User password", default: "mypass", password: true },
   ]},
-  { id: "mariadb", name: "MariaDB", version: "11", image: "mariadb:11", logoUrl: `${CDN}/mariadb/mariadb-original.svg`, hasAdminPanel: true, defaultPort: "3306", fields: [
+  { id: "mariadb", name: "MariaDB", version: "11", image: "mariadb:11", logoUrl: `${CDN}/mariadb/mariadb-original.svg`, defaultPort: "3306", fields: [
     { key: "MARIADB_DATABASE", label: "Database", default: "mydb" },
     { key: "MARIADB_USER", label: "User", default: "myuser" },
     { key: "MARIADB_PASSWORD", label: "User password", default: "mypass", password: true },
