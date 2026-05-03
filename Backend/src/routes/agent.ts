@@ -11,7 +11,7 @@ const router = express.Router();
 const NVIDIA_BASE_URL      = 'https://integrate.api.nvidia.com/v1';
 const NVIDIA_DEFAULT_MODEL = 'openai/gpt-oss-120b';
 const AI_CALL_DELAY_MS     = 1500;   // min gap between AI API calls
-const MAX_VERIFY_CYCLES    = 3;      // max Plan→Execute→Verify loops
+const MAX_VERIFY_CYCLES    = 2;      // max Plan→Execute→Verify loops
 const MAX_WAIT_MS          = 30_000; // cap on any single "wait" step
 const MAX_STEPS_PER_PLAN   = 20;     // cap total steps per plan/fix
 const MAX_FIX_STEPS        = 15;     // cap fix steps from evaluation AI
@@ -274,19 +274,23 @@ DOMAIN & SSL AUTOMATION:
 - To find the target port for a container: look it up in the LIVE DOCKER CONTEXT (the host port in the ports column).
 - The nginx container name is "docklet-nginx".
 
-STEP TYPES:
-- "message": { "content": "..." }
-- "wait": { "ms": 3000, "description": "Wait for service to initialize" }
-- "docker_pull": { "image": "name:tag", "description": "..." }
-- "docker_run": { "args": [...], "description": "..." }  — image is last arg
-- "docker_exec": { "container": "name", "command": "mongosh admin --eval \\"...\\"", "description": "...", "continueOnError": false }
-- "docker_stop": { "container": "name", "description": "...", "continueOnError": true }
-- "docker_remove": { "container": "name", "description": "...", "continueOnError": true }
-- "docker_free_port": { "port": 27017, "description": "..." }
-- "docker_logs": { "container": "name", "description": "..." }
-- "shell": { "command": "single-command-no-operators", "description": "...", "continueOnError": false }
-- "proxy_create_domain": { "domain": "client.example.com", "targetPort": 3000, "description": "Register subdomain in reverse proxy" }
-- "proxy_enable_ssl": { "domain": "example.com", "description": "Issue SSL certificate via Let's Encrypt" }
+STEP SCHEMA — every step MUST have a "type" key. Use EXACTLY these formats:
+
+{ "type": "message",          "content": "some text" }
+{ "type": "wait",             "ms": 8000, "description": "Wait for service to initialise" }
+{ "type": "docker_pull",      "image": "mongo:7", "description": "Pull image" }
+{ "type": "docker_run",       "args": ["-d","--name","mongodb","--restart=unless-stopped","-p","27017:27017","-e","MONGO_INITDB_ROOT_USERNAME=admin","-e","MONGO_INITDB_ROOT_PASSWORD=rootpass","mongo:7"], "description": "Start MongoDB" }
+{ "type": "docker_exec",      "container": "mongodb", "command": "mongosh --eval \"db.adminCommand({ping:1})\" --quiet", "description": "Ping", "continueOnError": true }
+{ "type": "docker_stop",      "container": "name", "description": "...", "continueOnError": true }
+{ "type": "docker_remove",    "container": "name", "description": "...", "continueOnError": true }
+{ "type": "docker_free_port", "port": 27017, "description": "Free port" }
+{ "type": "docker_logs",      "container": "name", "description": "Show logs" }
+{ "type": "shell",            "command": "single-command-no-operators", "description": "...", "continueOnError": false }
+{ "type": "proxy_create_domain", "domain": "sub.example.com", "targetPort": 3000, "description": "..." }
+{ "type": "proxy_enable_ssl",    "domain": "sub.example.com", "description": "..." }
+
+CRITICAL: The "type" field MUST be present on every step object. Do NOT use "action", "step", or any other key name.
+CRITICAL: All health-check docker_exec steps MUST have "continueOnError": true so a slow-starting service does not abort the plan.
 
 Respond ONLY with valid JSON — no markdown fences, no extra text:
 { "requiresDocker": true, "summary": "...", "steps": [...] }`;
@@ -422,8 +426,37 @@ async function planWithAI(message: string, apiKey: string, model: string): Promi
 
     const raw     = (res.choices?.[0]?.message?.content || '').trim();
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-    try { return JSON.parse(cleaned); }
-    catch {
+    try {
+        const parsed = JSON.parse(cleaned);
+        // ── Normalise steps — the AI sometimes uses "action", "step_type", or
+        // key-as-type format ({ "docker_run": {...} }) instead of { "type": "..." }
+        const KNOWN_TYPES = new Set([
+            'message','wait','docker_pull','docker_run','docker_exec','docker_stop',
+            'docker_remove','docker_free_port','docker_logs','shell',
+            'proxy_create_domain','proxy_enable_ssl',
+        ]);
+        if (Array.isArray(parsed.steps)) {
+            parsed.steps = parsed.steps.map((s: any) => {
+                if (s && typeof s === 'object') {
+                    // Alias: "action" or "step_type" → "type"
+                    if (!s.type && s.action)     s = { ...s, type: s.action };
+                    if (!s.type && s.step_type)  s = { ...s, type: s.step_type };
+                    if (!s.type && s.step)       s = { ...s, type: s.step };
+                    // Key-as-type: { "docker_run": { "args": [...] } }
+                    if (!s.type) {
+                        for (const key of Object.keys(s)) {
+                            if (KNOWN_TYPES.has(key) && typeof s[key] === 'object') {
+                                s = { type: key, ...s[key] };
+                                break;
+                            }
+                        }
+                    }
+                }
+                return s;
+            });
+        }
+        return parsed;
+    } catch {
         return { requiresDocker: false, summary: 'AI response', steps: [{ type: 'message', content: cleaned }] };
     }
 }
@@ -1246,36 +1279,26 @@ async function runAgentLoop(
     const handled = await tryDomainConnect(userId, agentId, message);
     if (handled) return;
 
-    // ── Phase 1: Plan (recipe first, AI fallback) ──────────────────────────
-    const recipe = getServiceRecipePlan(message);
+    // ── Phase 1: Plan (AI — searches Docker Hub dynamically) ──────────────
+    emitToUser(userId, 'agent:log', {
+        agentId, type: 'thinking',
+        content: 'Searching Docker Hub and planning your request…',
+    });
 
     let plan: ActionPlan;
-    if (recipe) {
-        // Use the hardcoded recipe — no AI call needed
-        plan = { requiresDocker: true, summary: recipe.summary, steps: recipe.steps };
-        emitToUser(userId, 'agent:log', {
-            agentId, type: 'info',
-            content: `Using verified recipe for ${recipe.name} — ${recipe.steps.length} step(s)`,
-        });
-        emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: plan.summary });
-    } else {
-        emitToUser(userId, 'agent:log', {
-            agentId, type: 'thinking',
-            content: 'Planning your request…',
-        });
-        try {
-            plan = await planWithAI(message, apiKey, model);
-        } catch (e: any) {
-            emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Planning failed: ${e.message}` });
-            emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Planning failed' });
-            return;
-        }
-        emitToUser(userId, 'agent:log', {
-            agentId, type: 'info',
-            content: `Plan ready — ${plan.steps.length} step(s): ${plan.steps.map(s => s.type).join(', ')}`,
-        });
-        emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: plan.summary });
+    try {
+        plan = await planWithAI(message, apiKey, model);
+    } catch (e: any) {
+        emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Planning failed: ${e.message}` });
+        emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Planning failed' });
+        return;
     }
+
+    emitToUser(userId, 'agent:log', {
+        agentId, type: 'info',
+        content: `Plan ready — ${plan.steps.length} step(s): ${plan.steps.map(s => s.type).join(', ')}`,
+    });
+    emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: plan.summary });
 
     if (timedOut()) { emitToUser(userId, 'agent:done', { agentId, success: false, summary: plan.summary }); return; }
 
