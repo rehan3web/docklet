@@ -267,9 +267,9 @@ export default function ProxyPage() {
             </Card>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Domain list */}
-            <div className="lg:col-span-2">
+            <div>
               <Card className="bg-background border-border shadow-none rounded-xl">
                 <CardHeader className="p-4 pb-2 border-b border-border/50">
                   <CardTitle className="text-sm font-medium">Domains</CardTitle>
@@ -308,7 +308,7 @@ export default function ProxyPage() {
             </div>
 
             {/* Detail panel */}
-            <div className="lg:col-span-3 space-y-4">
+            <div className="space-y-4">
               {!selected ? (
                 <Card className="bg-background border-border shadow-none rounded-xl">
                   <CardContent className="px-4 py-6 text-center">
