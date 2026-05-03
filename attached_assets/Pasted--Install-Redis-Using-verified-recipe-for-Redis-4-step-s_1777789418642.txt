@@ -1,0 +1,63 @@
+"Install Redis"
+Using verified recipe for Redis — 4 step(s)
+Deploy Redis 7 on port 6379
+Executing
+$ Freeing port 6379
+Port 6379 is now free
+Executing
+$ docker run -d --name redis --restart=unless-stopped -p 6379:6379 redis:7-alpine --requirepass rootpass
+Unable to find image 'redis:7-alpine' locally
+7-alpine: Pulling from library/redis
+6447bc944d85: Pulling fs layer
+1f0676652ae4: Pulling fs layer
+897d797d2723: Pulling fs layer
+51bf34b872a6: Pulling fs layer
+47836b8a3274: Pulling fs layer
+2da9501c87e4: Pulling fs layer
+4f4fb700ef54: Pulling fs layer
+9572acab3f32: Pulling fs layer
+4f4fb700ef54: Already exists
+9572acab3f32: Download complete
+897d797d2723: Download complete
+1f0676652ae4: Download complete
+2da9501c87e4: Download complete
+51bf34b872a6: Download complete
+6447bc944d85: Download complete
+2074d4e4f1bb: Download complete
+47836b8a3274: Download complete
+c3c3ab8d6b01: Download complete
+897d797d2723: Pull complete
+1f0676652ae4: Pull complete
+51bf34b872a6: Pull complete
+9572acab3f32: 
+Pull complete
+2da9501c87e4: Pull complete
+47836b8a3274: Pull complete
+4f4fb700ef54: Pull complete
+6447bc944d85: Pull complete
+Digest: sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6
+Status: Downloaded newer image for redis:7-alpine
+e44a338cddda6cbe5c06fb84374270dc0e5db1dc30b99cd2b7bebf6c31d07364
+Container started
+Waiting 2000ms — Wait for Redis
+Executing
+$ docker exec redis redis-cli -a rootpass ping
+Warning: Using a password with '-a' or '-u' option on the command line interface may not be safe.
+PONG
+Exec succeeded in "redis"
+Verifying results…
+Redis container is running and responded to PING, indicating successful installation.
+Done — Deploy Redis 7 on port 6379
+"insatll hello-world in docker"
+Plan ready — 4 step(s): , , ,
+Pull the official hello-world image and run it as a detached container.
+Verifying results…
+No hello-world container is running or has been created, so the installation request was not fulfilled
+Applying fix (attempt 1/2) — 3 step(s)…
+Re-verifying after fix (attempt 2/3)…
+No hello-world container is present; the installation request was not completed.
+Applying fix (attempt 2/2) — 2 step(s)…
+Re-verifying after fix (attempt 3/3)…
+The hello-world image was not installed or run; no hello-world container is present.
+All 3 fix attempts exhausted.
+Failed — Pull the official hello-world image and run it as a detached container.

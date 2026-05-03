@@ -329,6 +329,15 @@ PROXY/DOMAIN/SSL VERIFICATION RULES (very important):
 - If the log shows "Proxy entry created" and the nginx conf.d list shows the domain's .conf file, the proxy IS configured correctly. Set ok=true.
 - NEVER generate fixSteps that repeat proxy_create_domain or proxy_enable_ssl if those already appear with "[ok]" in the execution log.
 
+fixSteps MUST use the exact same step schema as the planner — every step MUST have a "type" field:
+{ "type": "docker_run",    "args": ["-d","--name","mysql","--restart=unless-stopped","-p","3306:3306","-e","MYSQL_ROOT_PASSWORD=rootpass","mysql:8"], "description": "..." }
+{ "type": "docker_exec",   "container": "mysql", "command": "mysqladmin ping -u root --password=rootpass --silent", "description": "...", "continueOnError": true }
+{ "type": "docker_stop",   "container": "name", "description": "...", "continueOnError": true }
+{ "type": "docker_remove", "container": "name", "description": "...", "continueOnError": true }
+{ "type": "docker_free_port", "port": 3306, "description": "..." }
+{ "type": "wait",          "ms": 5000, "description": "..." }
+CRITICAL: Use "type" — NOT "action", "step", "name", or any other key.
+
 Respond ONLY with valid JSON — no markdown, no extra text:
 {
   "ok": true,
@@ -339,13 +348,67 @@ OR:
 {
   "ok": false,
   "assessment": "One sentence: what is wrong and why",
-  "fixSteps": [ ...same step types as action plan... ]
+  "fixSteps": [ { "type": "...", ... }, ... ]
 }`;
 
 // ── AI calls ──────────────────────────────────────────────────────────────────
 
 function makeOpenAI(apiKey: string): OpenAI {
     return new OpenAI({ apiKey, baseURL: NVIDIA_BASE_URL });
+}
+
+// ── Step normaliser (shared by planner + evaluator) ──────────────────────────
+
+const KNOWN_STEP_TYPES = new Set([
+    'message','wait','docker_pull','docker_run','docker_exec','docker_stop',
+    'docker_remove','docker_free_port','docker_logs','shell',
+    'proxy_create_domain','proxy_enable_ssl',
+]);
+
+function normaliseSteps(steps: any[]): any[] {
+    if (!Array.isArray(steps)) return [];
+    return steps.map((s: any) => {
+        if (!s || typeof s !== 'object') return s;
+
+        // Already has a valid type — done
+        if (s.type && KNOWN_STEP_TYPES.has(s.type)) return s;
+
+        // String-alias fields: "action", "name", "operation", "kind", etc.
+        const typeAliases = ['action','step_type','step','name','operation','command_type','kind','tool','id'];
+        for (const alias of typeAliases) {
+            if (s[alias] && typeof s[alias] === 'string' && KNOWN_STEP_TYPES.has(s[alias])) {
+                const { [alias]: _rm, ...rest } = s;
+                return { type: s[alias], ...rest };
+            }
+        }
+
+        // Any string VALUE in the object that matches a known type
+        // e.g. { "id": "docker_run", "args": [...] }
+        for (const val of Object.values(s)) {
+            if (typeof val === 'string' && KNOWN_STEP_TYPES.has(val)) {
+                return { ...s, type: val };
+            }
+        }
+
+        // Key-as-type: { "docker_run": { "args": [...] } }  or  { "docker_pull": "mongo:7" }
+        const fieldMap: Record<string,string> = {
+            docker_pull: 'image', docker_stop: 'container', docker_remove: 'container',
+            docker_logs: 'container', docker_exec: 'container', shell: 'command',
+        };
+        for (const key of Object.keys(s)) {
+            if (!KNOWN_STEP_TYPES.has(key)) continue;
+            const val = s[key];
+            if (val && typeof val === 'object') {
+                return { type: key, ...val };
+            } else {
+                const field = fieldMap[key] || 'value';
+                const { [key]: _v, ...rest } = s;
+                return { type: key, [field]: val, ...rest };
+            }
+        }
+
+        return s;
+    });
 }
 
 // ── Docker Hub live search ────────────────────────────────────────────────────
@@ -428,33 +491,19 @@ async function planWithAI(message: string, apiKey: string, model: string): Promi
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
     try {
         const parsed = JSON.parse(cleaned);
-        // ── Normalise steps — the AI sometimes uses "action", "step_type", or
-        // key-as-type format ({ "docker_run": {...} }) instead of { "type": "..." }
-        const KNOWN_TYPES = new Set([
-            'message','wait','docker_pull','docker_run','docker_exec','docker_stop',
-            'docker_remove','docker_free_port','docker_logs','shell',
-            'proxy_create_domain','proxy_enable_ssl',
-        ]);
-        if (Array.isArray(parsed.steps)) {
-            parsed.steps = parsed.steps.map((s: any) => {
-                if (s && typeof s === 'object') {
-                    // Alias: "action" or "step_type" → "type"
-                    if (!s.type && s.action)     s = { ...s, type: s.action };
-                    if (!s.type && s.step_type)  s = { ...s, type: s.step_type };
-                    if (!s.type && s.step)       s = { ...s, type: s.step };
-                    // Key-as-type: { "docker_run": { "args": [...] } }
-                    if (!s.type) {
-                        for (const key of Object.keys(s)) {
-                            if (KNOWN_TYPES.has(key) && typeof s[key] === 'object') {
-                                s = { type: key, ...s[key] };
-                                break;
-                            }
-                        }
-                    }
-                }
-                return s;
-            });
+
+        // ── Normalise "steps" array — handle any key name the AI might use ──────
+        if (!Array.isArray(parsed.steps)) {
+            for (const key of ['plan','actions','tasks','commands','items']) {
+                if (Array.isArray(parsed[key])) { parsed.steps = parsed[key]; break; }
+            }
         }
+        if (!Array.isArray(parsed.steps)) parsed.steps = [];
+
+        parsed.steps = normaliseSteps(parsed.steps);
+
+        // Log for debugging
+        console.log('[agent] plan step types:', parsed.steps.map((s: any) => s?.type));
         return parsed;
     } catch {
         return { requiresDocker: false, summary: 'AI response', steps: [{ type: 'message', content: cleaned }] };
@@ -489,10 +538,11 @@ async function evaluateWithAI(
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
     try {
         const parsed = JSON.parse(cleaned);
+        const rawFix = Array.isArray(parsed.fixSteps) ? parsed.fixSteps : [];
         return {
             ok:         Boolean(parsed.ok),
             assessment: String(parsed.assessment || ''),
-            fixSteps:   Array.isArray(parsed.fixSteps) ? parsed.fixSteps : [],
+            fixSteps:   normaliseSteps(rawFix),
         };
     } catch {
         return { ok: false, assessment: 'Could not parse AI evaluation.', fixSteps: [] };
