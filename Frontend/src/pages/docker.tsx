@@ -543,13 +543,13 @@ export default function DockerPage() {
           {/* ── Spin a Database ──────────────────────────────────────────── */}
           <div>
             <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Spin a Database</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+            <div className="flex flex-wrap justify-center gap-2">
               {DB_CATALOG.map(db => (
                 <button
                   key={db.id}
                   onClick={() => dockerOk && openDbModal(db)}
                   disabled={!dockerOk}
-                  className="flex flex-col items-center gap-2 p-3 rounded-xl border border-border bg-card hover:bg-muted/50 hover:border-primary/30 transition-all text-center group disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex flex-col items-center gap-2 p-3 rounded-xl border border-border bg-card hover:bg-muted/50 hover:border-primary/30 transition-all text-center group disabled:opacity-40 disabled:cursor-not-allowed w-24"
                 >
                   {db.logoUrl
                     ? <img src={db.logoUrl} alt={db.name} className="w-8 h-8 object-contain" />
