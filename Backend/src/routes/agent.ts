@@ -230,9 +230,14 @@ RULES:
 4. Redeploy: stop old container → free port → pull → run.
 5. Use docker_exec for in-container operations (password changes, config, etc.).
 6. Use docker_free_port to release a port before binding it.
-7. Use "wait" to pause (e.g. wait 3000ms after starting MongoDB before pinging it).
+7. Use "wait" to pause after starting slow-init services (MySQL/MariaDB: 20000ms, MongoDB: 8000ms, PostgreSQL: 5000ms, RabbitMQ: 12000ms, others: 3000ms).
 8. Container names: lowercase alphanumeric + hyphens only.
 9. Always use --restart=unless-stopped and -d for persistent services.
+10. CRITICAL — docker_run args array: EVERY flag and its value MUST be a SEPARATE element. NEVER combine them.
+    CORRECT:   ["args": ["-d", "-e", "MYSQL_ROOT_PASSWORD=root", "-p", "3306:3306", "mysql:8"]]
+    WRONG:     ["args": ["-d", "-e MYSQL_ROOT_PASSWORD=root", "-p 3306:3306", "mysql:8"]]
+11. For services that need passwords (MySQL, MariaDB, PostgreSQL, MinIO): if the user did not specify a password, use "rootpass" as the default. NEVER leave a password field empty or as a placeholder like <password>.
+12. After docker_run, always add a "wait" step (minimum 3000ms) then a docker_exec health-check step to verify the service started correctly.
 
 ENVIRONMENT CONSTRAINTS (this host is a shared/containerized Linux environment):
 - NEVER use --sysctl flags in docker run — they are blocked (e.g. vm.overcommit_memory, net.core.*). Drop them silently.
@@ -604,21 +609,30 @@ async function executeSteps(
         }
 
         if (step.type === 'docker_run') {
-            // ── Hard-strip blocked flags before running ──────────────────────
-            let safeArgs = step.args.filter((a, i, arr) => {
-                // Strip --sysctl and its value (next token)
+            // ── Split any space-joined args the AI may have combined ──────────
+            // e.g. "-e MYSQL_ROOT_PASSWORD=root" must be ["-e", "MYSQL_ROOT_PASSWORD=root"]
+            let expandedArgs: string[] = [];
+            for (const a of step.args) {
+                if (typeof a === 'string' && a.includes(' ') && (a.startsWith('-') || /^[A-Z_]+=/.test(a))) {
+                    expandedArgs.push(...a.split(/\s+/).filter(Boolean));
+                } else {
+                    expandedArgs.push(a);
+                }
+            }
+
+            // ── Hard-strip blocked flags ──────────────────────────────────────
+            let safeArgs = expandedArgs.filter((a, i, arr) => {
                 if (a === '--sysctl') return false;
                 if (i > 0 && arr[i - 1] === '--sysctl') return false;
-                // Strip --sysctl=... inline form
                 if (a.startsWith('--sysctl=')) return false;
-                // Strip --privileged and --cap-add SYS_ADMIN
                 if (a === '--privileged') return false;
-                if (a === '--cap-add' ) return false;
+                if (a === '--cap-add') return false;
                 if (i > 0 && arr[i - 1] === '--cap-add') return false;
                 if (a === '--network' && arr[i + 1] === 'host') return false;
                 if (a === 'host' && i > 0 && arr[i - 1] === '--network') return false;
                 return true;
             });
+
             const label = `docker run ${safeArgs.join(' ')}`;
             cmd(label);
             let res = await streamCommand('docker', ['run', ...safeArgs], userId, agentId, logLines);
@@ -644,9 +658,30 @@ async function executeSteps(
                 }
             }
             if (res.exitCode !== 0) {
-                err(`Container failed to start (exit ${res.exitCode}): ${res.output.slice(-300)}`);
+                err(`Container failed to start (exit ${res.exitCode}): ${res.output.slice(-400)}`);
                 return { failed: true, log: logLines.join('\n') };
             }
+
+            // ── Detect silent crash: container started but exited immediately ─
+            // docker run -d returns 0 even if the container dies right away.
+            // Wait 2s then check if it is actually still running.
+            await sleep(2_000);
+            const nameIdx = safeArgs.indexOf('--name');
+            const containerName = nameIdx !== -1 ? safeArgs[nameIdx + 1] : null;
+            if (containerName) {
+                try {
+                    const statusOut = execSync(
+                        `docker inspect --format "{{.State.Status}}" ${containerName}`,
+                        { stdio: 'pipe', timeout: 5_000 }
+                    ).toString().trim();
+                    if (statusOut === 'exited' || statusOut === 'dead') {
+                        err(`Container "${containerName}" exited immediately after start (status: ${statusOut}). Fetching logs…`);
+                        await streamCommand('docker', ['logs', '--tail', '50', containerName], userId, agentId, logLines);
+                        return { failed: true, log: logLines.join('\n') };
+                    }
+                } catch { /* container may not exist yet — ignore */ }
+            }
+
             ok('Container started');
             continue;
         }
