@@ -302,7 +302,7 @@ export default function AiPage() {
 
         {/* Header */}
         <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border">
-          <div className="px-4 h-14 flex items-center justify-between gap-3">
+          <div className="px-4 h-18 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <MobileSidebarTrigger />
               <div className="p-1 rounded bg-primary/10 border border-primary/20 shrink-0">

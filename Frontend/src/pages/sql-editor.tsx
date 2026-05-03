@@ -121,7 +121,7 @@ export default function SqlEditorPage() {
         <div className="min-h-screen bg-background text-foreground flex overflow-hidden">
             <DesktopSidebar />
             <div className="flex-1 flex flex-col min-w-0 h-screen">
-                <header className="h-14 border-b border-border bg-background flex items-center justify-between px-4 shrink-0">
+                <header className="h-18 border-b border-border bg-background flex items-center justify-between px-4 shrink-0">
                     <div className="flex items-center gap-4">
                         <MobileSidebarTrigger />
                         <div className="flex items-center gap-2">
