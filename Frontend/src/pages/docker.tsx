@@ -191,24 +191,25 @@ type DbField = { key: string; label: string; default: string; password?: boolean
 type DbDef = {
   id: string; name: string; version: string; image: string;
   logoUrl?: string; defaultPort: string; extraPorts?: string[];
+  hasAdminPanel?: boolean;
   fields: DbField[];
 };
 
 const CDN = "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons";
 
 const DB_CATALOG: DbDef[] = [
-  { id: "postgres", name: "PostgreSQL", version: "16", image: "postgres:16", logoUrl: `${CDN}/postgresql/postgresql-original.svg`, defaultPort: "5432", fields: [
+  { id: "postgres", name: "PostgreSQL", version: "16", image: "postgres:16", logoUrl: `${CDN}/postgresql/postgresql-original.svg`, hasAdminPanel: true, defaultPort: "5432", fields: [
     { key: "POSTGRES_DB", label: "Database", default: "mydb" },
     { key: "POSTGRES_USER", label: "Username", default: "postgres" },
     { key: "POSTGRES_PASSWORD", label: "Password", default: "postgres", password: true },
   ]},
-  { id: "mysql", name: "MySQL", version: "8", image: "mysql:8", logoUrl: `${CDN}/mysql/mysql-original.svg`, defaultPort: "3306", fields: [
+  { id: "mysql", name: "MySQL", version: "8", image: "mysql:8", logoUrl: `${CDN}/mysql/mysql-original.svg`, hasAdminPanel: true, defaultPort: "3306", fields: [
     { key: "MYSQL_DATABASE", label: "Database", default: "mydb" },
     { key: "MYSQL_ROOT_PASSWORD", label: "Root password", default: "rootpass", password: true },
     { key: "MYSQL_USER", label: "User", default: "myuser" },
     { key: "MYSQL_PASSWORD", label: "User password", default: "mypass", password: true },
   ]},
-  { id: "mariadb", name: "MariaDB", version: "11", image: "mariadb:11", logoUrl: `${CDN}/mariadb/mariadb-original.svg`, defaultPort: "3306", fields: [
+  { id: "mariadb", name: "MariaDB", version: "11", image: "mariadb:11", logoUrl: `${CDN}/mariadb/mariadb-original.svg`, hasAdminPanel: true, defaultPort: "3306", fields: [
     { key: "MARIADB_DATABASE", label: "Database", default: "mydb" },
     { key: "MARIADB_USER", label: "User", default: "myuser" },
     { key: "MARIADB_PASSWORD", label: "User password", default: "mypass", password: true },
@@ -289,6 +290,8 @@ export default function DockerPage() {
   const [dbContainerName, setDbContainerName] = useState("");
   const [dbPort, setDbPort] = useState("");
   const [dbPublic, setDbPublic] = useState(false);
+  const [dbIncludeAdminer, setDbIncludeAdminer] = useState(false);
+  const [dbAdminerPort, setDbAdminerPort] = useState("8080");
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
 
   // Shared log modal
@@ -364,6 +367,8 @@ export default function DockerPage() {
     setDbContainerName(db.id);
     setDbPort(db.defaultPort);
     setDbPublic(false);
+    setDbIncludeAdminer(false);
+    setDbAdminerPort("8080");
     setShowPasswords({});
     setSelectedDb(db);
   }
@@ -389,15 +394,33 @@ export default function DockerPage() {
     if (selectedDb.extraPorts) ports.push(...selectedDb.extraPorts.map(p => `${hostIp}:${p}`));
 
     const dbCopy = selectedDb;
+    const includeAdminer = dbIncludeAdminer && !!dbCopy.hasAdminPanel;
+    const adminerPort = dbAdminerPort;
+    const adminerName = `${dbContainerName}-adminer`;
     setSelectedDb(null);
-    openLog(`Spinning up ${dbCopy.name}`);
+    openLog(`Spinning up ${dbCopy.name}${includeAdminer ? " + Adminer" : ""}`);
     const result = await dockerPullRun(dbCopy.image, dbContainerName, ports, env, cmd, line => {
       setLogLines(p => [...p, line]);
     });
-    setLogOk(result.ok);
-    setLogDone(true);
-    if (result.ok) { toast.success(`${dbCopy.name} started!`); refresh(); }
-    else toast.error(result.error || "Deploy failed");
+    if (result.ok && includeAdminer) {
+      setLogLines(p => [...p, `\n— Deploying Adminer on port ${adminerPort}...\n`]);
+      const adminerResult = await dockerPullRun(
+        "adminer:latest", adminerName,
+        [`${hostIp}:${adminerPort}:8080`],
+        [`ADMINER_DEFAULT_SERVER=${dbContainerName}`],
+        [],
+        line => setLogLines(p => [...p, line])
+      );
+      setLogOk(adminerResult.ok);
+      setLogDone(true);
+      if (adminerResult.ok) { toast.success(`${dbCopy.name} + Adminer started!`); refresh(); }
+      else toast.error(adminerResult.error || "Adminer deploy failed");
+    } else {
+      setLogOk(result.ok);
+      setLogDone(true);
+      if (result.ok) { toast.success(`${dbCopy.name} started!`); refresh(); }
+      else toast.error(result.error || "Deploy failed");
+    }
   }
 
   const containers = containersData?.containers || [];
@@ -734,6 +757,29 @@ export default function DockerPage() {
                   <p className="text-[10px] text-muted-foreground">
                     Additional ports: {selectedDb.extraPorts.join(", ")} (auto-mapped)
                   </p>
+                )}
+                {selectedDb.hasAdminPanel && (
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2">
+                      <div>
+                        <p className="text-xs font-medium">Include Adminer web panel</p>
+                        <p className="text-[10px] text-muted-foreground">Lightweight SQL admin UI — works with all SQL databases</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDbIncludeAdminer(p => !p)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${dbIncludeAdminer ? "bg-primary" : "bg-muted"}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${dbIncludeAdminer ? "translate-x-4" : "translate-x-0"}`} />
+                      </button>
+                    </div>
+                    {dbIncludeAdminer && (
+                      <div className="px-3 pb-3 border-t border-border/50 pt-2 space-y-1">
+                        <label className="text-[10px] text-muted-foreground">Adminer host port</label>
+                        <Input value={dbAdminerPort} onChange={e => setDbAdminerPort(e.target.value)} className="h-8 text-xs font-mono" />
+                      </div>
+                    )}
+                  </div>
                 )}
                 <div className="flex gap-2 justify-end pt-1">
                   <Button variant="outline" size="sm" className="text-xs" onClick={() => setSelectedDb(null)}>Cancel</Button>

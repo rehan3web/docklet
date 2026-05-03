@@ -22,7 +22,7 @@ import { Link } from "wouter";
 import {
   useGetDockerContainers,
   dockerStart, dockerStop, dockerRestart, dockerRemove,
-  dockerInspect, dockerLogs,
+  dockerInspect, dockerLogs, dockerRebind,
   useGetContainerEnv, containerEnvSet, containerEnvDelete, containerEnvApply, containerEnvVersions, containerEnvRollback,
   useGetContainerSchedules, containerScheduleCreate, containerScheduleUpdate, containerScheduleDelete, containerScheduleRun, containerScheduleLogs,
   containerDomainGet, containerDomainAssign, containerDomainNginx, containerDomainDelete, containerDomainRegenerate, containerDomainTraefik, traefikComposeSnippet,
@@ -68,6 +68,10 @@ const TABS = [
 function ActionTab({ container, onRefresh }: { container: DockerContainer; onRefresh: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [rebindOpen, setRebindOpen] = useState(false);
+  const [rebindLogs, setRebindLogs] = useState<string[]>([]);
+  const [rebindDone, setRebindDone] = useState(false);
+  const [rebindOk, setRebindOk] = useState(false);
   const [networkOpen, setNetworkOpen] = useState(false);
   const [mountsOpen, setMountsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -83,6 +87,20 @@ function ActionTab({ container, onRefresh }: { container: DockerContainer; onRef
     try { await fn(); toast.success(`${label} succeeded`); onRefresh(); }
     catch (err: any) { toast.error(err.message || `${label} failed`); }
     finally { setBusy(null); }
+  }
+
+  async function doRebind(makePublic: boolean) {
+    setRebindLogs([]);
+    setRebindDone(false);
+    setRebindOk(false);
+    setRebindOpen(true);
+    const result = await dockerRebind(container.id, makePublic, line => {
+      setRebindLogs(p => [...p, line]);
+    });
+    setRebindOk(result.ok);
+    setRebindDone(true);
+    if (result.ok) { toast.success(`Container is now ${makePublic ? "public" : "private"}`); onRefresh(); }
+    else toast.error(result.error || "Rebind failed");
   }
 
   async function openNetwork() {
@@ -229,6 +247,69 @@ function ActionTab({ container, onRefresh }: { container: DockerContainer; onRef
           </tbody>
         </table>
       </div>
+
+      {/* Port binding toggle */}
+      {container.ports && container.ports.some(p => p.publicPort) && (() => {
+        const isPublic = container.ports.some(p => !p.hostIp || p.hostIp === "0.0.0.0");
+        return (
+          <div className="rounded-xl border border-border overflow-hidden">
+            <div className="px-4 py-3 bg-muted/30 border-b border-border">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Port Binding</span>
+            </div>
+            <div className="p-4 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium text-foreground">{isPublic ? "Public (0.0.0.0)" : "Private (127.0.0.1)"}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {isPublic ? "Ports are accessible from outside the host" : "Ports are bound to localhost only"}
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  variant={isPublic ? "default" : "outline"}
+                  className="h-8 text-xs gap-1.5"
+                  disabled={!!busy}
+                  onClick={() => doRebind(false)}
+                >
+                  <Globe className="w-3.5 h-3.5" />Private
+                </Button>
+                <Button
+                  size="sm"
+                  variant={!isPublic ? "default" : "outline"}
+                  className="h-8 text-xs gap-1.5"
+                  disabled={!!busy}
+                  onClick={() => doRebind(true)}
+                >
+                  <Globe className="w-3.5 h-3.5" />Public
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Rebind log dialog */}
+      <Dialog open={rebindOpen} onOpenChange={o => { if (!o && rebindDone) setRebindOpen(false); }}>
+        <DialogContent className="max-w-lg w-full p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-4 py-3 border-b border-border">
+            <DialogTitle className="text-sm font-medium flex items-center gap-2">
+              <Globe className="w-4 h-4 text-muted-foreground" />Rebinding ports…
+            </DialogTitle>
+          </DialogHeader>
+          <pre className="p-4 text-[11px] font-mono bg-black text-green-400 overflow-auto max-h-64 whitespace-pre-wrap">
+            {rebindLogs.join("")}
+            {!rebindDone && <span className="animate-pulse">▌</span>}
+          </pre>
+          {rebindDone && (
+            <div className={`px-4 py-3 border-t border-border flex items-center justify-between ${rebindOk ? "bg-emerald-500/5" : "bg-red-500/5"}`}>
+              <span className={`text-xs font-medium ${rebindOk ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+                {rebindOk ? "✓ Done" : "✗ Failed"}
+              </span>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setRebindOpen(false)}>Close</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Confirm remove */}
       <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>

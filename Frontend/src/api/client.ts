@@ -476,7 +476,7 @@ export type DockerContainer = {
   createdAt: number;
   state: string;
   status: string;
-  ports: { privatePort: number; publicPort?: number; type: string }[];
+  ports: { privatePort: number; publicPort?: number; hostIp?: string; type: string }[];
 };
 
 export type DockerStatus = { available: boolean; reason?: string; containers?: number; running?: number; stopped?: number; images?: number; serverVersion?: string; os?: string };
@@ -570,6 +570,13 @@ export async function dockerComposeUp(
   onLog: (line: string) => void
 ): Promise<{ ok: boolean; error?: string }> {
   return dockerStreamDeploy("/docker/compose-up", { yaml }, onLog);
+}
+
+export async function dockerRebind(
+  id: string, makePublic: boolean,
+  onLog: (line: string) => void
+): Promise<{ ok: boolean; error?: string }> {
+  return dockerStreamDeploy("/docker/rebind", { id, public: makePublic }, onLog);
 }
 
 // ── GitHub Auto Deploy ────────────────────────────────────────────────────────

@@ -69,6 +69,7 @@ router.get('/containers', authenticateToken, async (_req, res) => {
             ports: (c.Ports || []).map(p => ({
                 privatePort: p.PrivatePort,
                 publicPort: p.PublicPort,
+                hostIp: (p as any).IP || '',
                 type: p.Type,
             })),
         }));
@@ -346,6 +347,70 @@ router.post('/pull-run', authenticateToken, async (req, res) => {
         const cname = (info.Name || '').replace('/', '');
         send({ log: `\nContainer started: ${cname} (${info.Id.slice(0, 12)})\n` });
         send({ done: true, ok: true, containerId: info.Id.slice(0, 12) });
+    } catch (err: any) {
+        send({ log: `\nError: ${err.message}\n` });
+        send({ done: true, ok: false, error: err.message });
+    }
+    res.end();
+});
+
+// ── Rebind port binding (public ↔ private) ────────────────────────────────────
+router.post('/rebind', authenticateToken, async (req, res) => {
+    const { id, public: makePublic } = req.body;
+    if (!id) return res.status(400).json({ message: 'id required' });
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const send = (data: object) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+    const newIp = makePublic ? '0.0.0.0' : '127.0.0.1';
+
+    try {
+        const d = getDocker();
+        const c = d.getContainer(id);
+        const info = await c.inspect();
+        const name = (info.Name || '').replace(/^\//, '');
+        const image = info.Config.Image;
+        const env = info.Config.Env || [];
+        const cmd = info.Config.Cmd || [];
+        const oldBindings: Record<string, any[]> = (info.HostConfig as any).PortBindings || {};
+        const restartPolicy = (info.HostConfig as any).RestartPolicy || { Name: 'unless-stopped' };
+
+        const newPortBindings: Record<string, any[]> = {};
+        const exposedPorts: Record<string, {}> = {};
+        for (const [port, bindings] of Object.entries(oldBindings)) {
+            if (Array.isArray(bindings) && bindings.length > 0) {
+                newPortBindings[port] = bindings.map((b: any) => ({ HostPort: b.HostPort || '', HostIp: newIp }));
+            } else {
+                newPortBindings[port] = [{ HostIp: newIp, HostPort: '' }];
+            }
+            exposedPorts[port] = {};
+        }
+
+        send({ log: `Stopping ${name}...\n` });
+        try { await c.stop({ t: 5 }); } catch {}
+        send({ log: `Removing ${name}...\n` });
+        await c.remove();
+
+        send({ log: `Recreating with ${makePublic ? 'public (0.0.0.0)' : 'private (127.0.0.1)'} binding...\n` });
+        const createOpts: any = {
+            name,
+            Image: image,
+            Env: env,
+            ExposedPorts: exposedPorts,
+            HostConfig: { PortBindings: newPortBindings, RestartPolicy: restartPolicy },
+        };
+        if (cmd && cmd.length) createOpts.Cmd = cmd;
+
+        const newC = await d.createContainer(createOpts);
+        await newC.start();
+        const newInfo = await newC.inspect();
+        send({ log: `\nDone — ${name} (${newInfo.Id.slice(0, 12)}) now ${makePublic ? 'public' : 'private'}.\n` });
+        send({ done: true, ok: true, containerId: newInfo.Id.slice(0, 12) });
     } catch (err: any) {
         send({ log: `\nError: ${err.message}\n` });
         send({ done: true, ok: false, error: err.message });
