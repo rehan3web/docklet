@@ -959,6 +959,262 @@ async function tryDomainConnect(
     return true;
 }
 
+// ── Hardcoded service recipes (reliable, no AI planning needed) ───────────────
+
+interface ServiceRecipe {
+    name: string;
+    summary: string;
+    steps: AgentStep[];
+}
+
+function getServiceRecipePlan(message: string): ServiceRecipe | null {
+    const m = message.toLowerCase();
+
+    // Only activate for install/deploy/start/setup/run requests
+    const isInstall = /\b(install|deploy|start|setup|run|launch|create|spin up|add)\b/.test(m);
+    if (!isInstall) return null;
+
+    if (/\bmongo(db)?\b/.test(m)) return {
+        name: 'MongoDB',
+        summary: 'Deploy MongoDB 7 on port 27017',
+        steps: [
+            { type: 'docker_free_port', port: 27017, description: 'Free port 27017' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'mongodb', '--restart=unless-stopped',
+                '-p', '27017:27017',
+                '-e', 'MONGO_INITDB_ROOT_USERNAME=admin',
+                '-e', 'MONGO_INITDB_ROOT_PASSWORD=rootpass',
+                'mongo:7',
+            ], description: 'Start MongoDB 7' },
+            { type: 'wait', ms: 8000, description: 'Wait for MongoDB to initialise' },
+            { type: 'docker_exec', container: 'mongodb', continueOnError: true,
+                command: 'mongosh --eval "db.adminCommand({ping:1})" -u admin -p rootpass --authenticationDatabase admin --quiet',
+                description: 'Ping MongoDB' },
+        ],
+    };
+
+    if (/\bmysql\b/.test(m)) return {
+        name: 'MySQL',
+        summary: 'Deploy MySQL 8 on port 3306',
+        steps: [
+            { type: 'docker_free_port', port: 3306, description: 'Free port 3306' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'mysql', '--restart=unless-stopped',
+                '-p', '3306:3306',
+                '-e', 'MYSQL_ROOT_PASSWORD=rootpass',
+                'mysql:8',
+            ], description: 'Start MySQL 8' },
+            { type: 'wait', ms: 25000, description: 'Wait for MySQL to initialise (~25s)' },
+            { type: 'docker_exec', container: 'mysql', continueOnError: true,
+                command: 'mysqladmin ping -u root --password=rootpass --silent',
+                description: 'Ping MySQL' },
+        ],
+    };
+
+    if (/\bmariadb\b/.test(m)) return {
+        name: 'MariaDB',
+        summary: 'Deploy MariaDB on port 3306',
+        steps: [
+            { type: 'docker_free_port', port: 3306, description: 'Free port 3306' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'mariadb', '--restart=unless-stopped',
+                '-p', '3306:3306',
+                '-e', 'MARIADB_ROOT_PASSWORD=rootpass',
+                'mariadb:latest',
+            ], description: 'Start MariaDB' },
+            { type: 'wait', ms: 15000, description: 'Wait for MariaDB to initialise' },
+            { type: 'docker_exec', container: 'mariadb', continueOnError: true,
+                command: 'mysqladmin ping -u root --password=rootpass --silent',
+                description: 'Ping MariaDB' },
+        ],
+    };
+
+    if (/\bredis\b/.test(m)) return {
+        name: 'Redis',
+        summary: 'Deploy Redis 7 on port 6379',
+        steps: [
+            { type: 'docker_free_port', port: 6379, description: 'Free port 6379' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'redis', '--restart=unless-stopped',
+                '-p', '6379:6379',
+                'redis:7-alpine', '--requirepass', 'rootpass',
+            ], description: 'Start Redis 7' },
+            { type: 'wait', ms: 2000, description: 'Wait for Redis' },
+            { type: 'docker_exec', container: 'redis', continueOnError: true,
+                command: 'redis-cli -a rootpass ping',
+                description: 'Ping Redis' },
+        ],
+    };
+
+    if (/\bpostgres(ql)?\b/.test(m)) return {
+        name: 'PostgreSQL',
+        summary: 'Deploy PostgreSQL 16 on port 5432',
+        steps: [
+            { type: 'docker_free_port', port: 5432, description: 'Free port 5432' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'postgres', '--restart=unless-stopped',
+                '-p', '5432:5432',
+                '-e', 'POSTGRES_PASSWORD=rootpass',
+                '-e', 'POSTGRES_USER=admin',
+                '-e', 'POSTGRES_DB=app',
+                'postgres:16-alpine',
+            ], description: 'Start PostgreSQL 16' },
+            { type: 'wait', ms: 5000, description: 'Wait for PostgreSQL' },
+            { type: 'docker_exec', container: 'postgres', continueOnError: true,
+                command: 'pg_isready -U admin',
+                description: 'Check PostgreSQL ready' },
+        ],
+    };
+
+    if (/\b(rabbit(mq)?)\b/.test(m)) return {
+        name: 'RabbitMQ',
+        summary: 'Deploy RabbitMQ 3 on ports 5672 / 15672',
+        steps: [
+            { type: 'docker_free_port', port: 5672,  description: 'Free port 5672' },
+            { type: 'docker_free_port', port: 15672, description: 'Free port 15672' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'rabbitmq', '--restart=unless-stopped',
+                '-p', '5672:5672',
+                '-p', '15672:15672',
+                '-e', 'RABBITMQ_DEFAULT_USER=admin',
+                '-e', 'RABBITMQ_DEFAULT_PASS=rootpass',
+                'rabbitmq:3-management',
+            ], description: 'Start RabbitMQ 3 with management UI' },
+            { type: 'wait', ms: 12000, description: 'Wait for RabbitMQ to initialise' },
+            { type: 'docker_exec', container: 'rabbitmq', continueOnError: true,
+                command: 'rabbitmq-diagnostics ping --quiet',
+                description: 'Ping RabbitMQ' },
+        ],
+    };
+
+    if (/\bnginx\b/.test(m) && !/proxy/.test(m)) return {
+        name: 'Nginx',
+        summary: 'Deploy Nginx on port 80',
+        steps: [
+            { type: 'docker_free_port', port: 80, description: 'Free port 80' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'nginx', '--restart=unless-stopped',
+                '-p', '80:80',
+                'nginx:alpine',
+            ], description: 'Start Nginx' },
+            { type: 'wait', ms: 2000, description: 'Wait for Nginx' },
+            { type: 'docker_exec', container: 'nginx', continueOnError: true,
+                command: 'nginx -t',
+                description: 'Test Nginx config' },
+        ],
+    };
+
+    if (/\bgrafana\b/.test(m)) return {
+        name: 'Grafana',
+        summary: 'Deploy Grafana on port 3000',
+        steps: [
+            { type: 'docker_free_port', port: 3000, description: 'Free port 3000' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'grafana', '--restart=unless-stopped',
+                '-p', '3000:3000',
+                '-e', 'GF_SECURITY_ADMIN_PASSWORD=rootpass',
+                'grafana/grafana:latest',
+            ], description: 'Start Grafana' },
+            { type: 'wait', ms: 5000, description: 'Wait for Grafana' },
+            { type: 'docker_exec', container: 'grafana', continueOnError: true,
+                command: 'wget -qO- http://localhost:3000/api/health',
+                description: 'Check Grafana health' },
+        ],
+    };
+
+    if (/\bprometheus\b/.test(m)) return {
+        name: 'Prometheus',
+        summary: 'Deploy Prometheus on port 9090',
+        steps: [
+            { type: 'docker_free_port', port: 9090, description: 'Free port 9090' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'prometheus', '--restart=unless-stopped',
+                '-p', '9090:9090',
+                'prom/prometheus:latest',
+            ], description: 'Start Prometheus' },
+            { type: 'wait', ms: 4000, description: 'Wait for Prometheus' },
+            { type: 'docker_exec', container: 'prometheus', continueOnError: true,
+                command: 'wget -qO- http://localhost:9090/-/ready',
+                description: 'Check Prometheus ready' },
+        ],
+    };
+
+    if (/\bminio\b/.test(m)) return {
+        name: 'MinIO',
+        summary: 'Deploy MinIO on ports 9000 / 9001',
+        steps: [
+            { type: 'docker_free_port', port: 9000, description: 'Free port 9000' },
+            { type: 'docker_free_port', port: 9001, description: 'Free port 9001' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'minio', '--restart=unless-stopped',
+                '-p', '9000:9000',
+                '-p', '9001:9001',
+                '-e', 'MINIO_ROOT_USER=admin',
+                '-e', 'MINIO_ROOT_PASSWORD=rootpass123',
+                'minio/minio:latest',
+                'server', '/data', '--console-address', ':9001',
+            ], description: 'Start MinIO' },
+            { type: 'wait', ms: 5000, description: 'Wait for MinIO' },
+            { type: 'docker_exec', container: 'minio', continueOnError: true,
+                command: 'mc ready local 2>/dev/null || echo "MinIO up"',
+                description: 'Check MinIO status' },
+        ],
+    };
+
+    if (/\bmemcached\b/.test(m)) return {
+        name: 'Memcached',
+        summary: 'Deploy Memcached on port 11211',
+        steps: [
+            { type: 'docker_free_port', port: 11211, description: 'Free port 11211' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'memcached', '--restart=unless-stopped',
+                '-p', '11211:11211',
+                'memcached:alpine',
+            ], description: 'Start Memcached' },
+            { type: 'wait', ms: 2000, description: 'Wait for Memcached' },
+        ],
+    };
+
+    if (/\bn8n\b/.test(m)) return {
+        name: 'n8n',
+        summary: 'Deploy n8n workflow automation on port 5678',
+        steps: [
+            { type: 'docker_free_port', port: 5678, description: 'Free port 5678' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'n8n', '--restart=unless-stopped',
+                '-p', '5678:5678',
+                '-e', 'N8N_BASIC_AUTH_ACTIVE=true',
+                '-e', 'N8N_BASIC_AUTH_USER=admin',
+                '-e', 'N8N_BASIC_AUTH_PASSWORD=rootpass',
+                'n8nio/n8n:latest',
+            ], description: 'Start n8n' },
+            { type: 'wait', ms: 8000, description: 'Wait for n8n' },
+        ],
+    };
+
+    if (/\belastic(search)?\b/.test(m)) return {
+        name: 'Elasticsearch',
+        summary: 'Deploy Elasticsearch 8 on port 9200',
+        steps: [
+            { type: 'docker_free_port', port: 9200, description: 'Free port 9200' },
+            { type: 'docker_run', args: [
+                '-d', '--name', 'elasticsearch', '--restart=unless-stopped',
+                '-p', '9200:9200',
+                '-e', 'discovery.type=single-node',
+                '-e', 'xpack.security.enabled=false',
+                '-e', 'ES_JAVA_OPTS=-Xms512m -Xmx512m',
+                'elasticsearch:8.13.0',
+            ], description: 'Start Elasticsearch 8' },
+            { type: 'wait', ms: 20000, description: 'Wait for Elasticsearch to initialise' },
+            { type: 'docker_exec', container: 'elasticsearch', continueOnError: true,
+                command: 'curl -s http://localhost:9200/_cluster/health | grep -q status',
+                description: 'Check Elasticsearch health' },
+        ],
+    };
+
+    return null;
+}
+
 // ── ReAct loop (Plan → Execute → Verify → Fix → Verify …) ────────────────────
 
 async function runAgentLoop(
@@ -990,28 +1246,36 @@ async function runAgentLoop(
     const handled = await tryDomainConnect(userId, agentId, message);
     if (handled) return;
 
-    // ── Phase 1: Plan ──────────────────────────────────────────────────────
-    emitToUser(userId, 'agent:log', {
-        agentId, type: 'thinking',
-        content: 'Planning your request…',
-    });
+    // ── Phase 1: Plan (recipe first, AI fallback) ──────────────────────────
+    const recipe = getServiceRecipePlan(message);
 
     let plan: ActionPlan;
-    try {
-        plan = await planWithAI(message, apiKey, model);
-    } catch (e: any) {
-        emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Planning failed: ${e.message}` });
-        emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Planning failed' });
-        return;
+    if (recipe) {
+        // Use the hardcoded recipe — no AI call needed
+        plan = { requiresDocker: true, summary: recipe.summary, steps: recipe.steps };
+        emitToUser(userId, 'agent:log', {
+            agentId, type: 'info',
+            content: `Using verified recipe for ${recipe.name} — ${recipe.steps.length} step(s)`,
+        });
+        emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: plan.summary });
+    } else {
+        emitToUser(userId, 'agent:log', {
+            agentId, type: 'thinking',
+            content: 'Planning your request…',
+        });
+        try {
+            plan = await planWithAI(message, apiKey, model);
+        } catch (e: any) {
+            emitToUser(userId, 'agent:log', { agentId, type: 'error', content: `Planning failed: ${e.message}` });
+            emitToUser(userId, 'agent:done', { agentId, success: false, summary: 'Planning failed' });
+            return;
+        }
+        emitToUser(userId, 'agent:log', {
+            agentId, type: 'info',
+            content: `Plan ready — ${plan.steps.length} step(s): ${plan.steps.map(s => s.type).join(', ')}`,
+        });
+        emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: plan.summary });
     }
-
-    // Emit a debug line showing how many steps were planned
-    emitToUser(userId, 'agent:log', {
-        agentId, type: 'info',
-        content: `Plan ready — ${plan.steps.length} step(s): ${plan.steps.map(s => s.type).join(', ')}`,
-    });
-
-    emitToUser(userId, 'agent:log', { agentId, type: 'ai', content: plan.summary });
 
     if (timedOut()) { emitToUser(userId, 'agent:done', { agentId, success: false, summary: plan.summary }); return; }
 
