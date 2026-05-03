@@ -267,10 +267,10 @@ export default function ProxyPage() {
             </Card>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
             {/* Domain list */}
-            <div>
-              <Card className="bg-background border-border shadow-none rounded-xl">
+            <div className="h-full">
+              <Card className="bg-background border-border shadow-none rounded-xl h-full">
                 <CardHeader className="p-4 pb-2 border-b border-border/50">
                   <CardTitle className="text-sm font-medium">Domains</CardTitle>
                   <CardDescription className="text-xs text-muted-foreground">{domains.length} configured</CardDescription>
@@ -308,9 +308,9 @@ export default function ProxyPage() {
             </div>
 
             {/* Detail panel */}
-            <div className="space-y-4">
+            <div className="space-y-4 h-full">
               {!selected ? (
-                <Card className="bg-background border-border shadow-none rounded-xl">
+                <Card className="bg-background border-border shadow-none rounded-xl h-full flex flex-col items-center justify-center">
                   <CardContent className="px-4 py-6 text-center">
                     <Globe className="w-7 h-7 text-muted-foreground/30 mx-auto mb-2" />
                     <p className="text-xs text-muted-foreground">Select a domain to see DNS instructions and SSL setup.</p>
