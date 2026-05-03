@@ -44,7 +44,7 @@ export default function StatisticsPage() {
             <DesktopSidebar />
             <div className="flex-1 flex flex-col min-w-0">
                 <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border">
-                    <div className="px-4 h-18 flex items-center justify-between">
+                    <div className="px-4 h-14 flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <MobileSidebarTrigger />
                             <div className="hidden lg:flex items-center gap-3">

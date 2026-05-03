@@ -95,27 +95,30 @@ export default function DomainsPage() {
       <DesktopSidebar />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-border/60 shrink-0">
-          <MobileSidebarTrigger />
-          <Globe className="w-4 h-4 text-muted-foreground" />
-          <h1 className="text-sm font-semibold text-foreground">Domains</h1>
-          <span className="text-muted-foreground text-xs hidden sm:block">
-            Verify domains once — use everywhere
-          </span>
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="outline" size="sm"
-              className="h-8 text-xs gap-1.5"
-              onClick={() => setShowAdd(v => !v)}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Domain
-            </Button>
-            <button onClick={toggle} className="p-2 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground">
-              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
+        <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border">
+          <div className="px-4 h-14 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <MobileSidebarTrigger />
+              <div className="p-1 rounded bg-primary/10 border border-primary/20 shrink-0">
+                <Globe className="w-4 h-4 text-primary" />
+              </div>
+              <h1 className="font-semibold text-sm tracking-tight">Domains</h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline" size="sm"
+                className="h-8 text-xs gap-1.5"
+                onClick={() => setShowAdd(v => !v)}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Domain
+              </Button>
+              <button onClick={toggle} className="p-2 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground">
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
-        </div>
+        </header>
 
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-3xl mx-auto space-y-4">
