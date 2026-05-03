@@ -190,42 +190,44 @@ function StatCard({ label, value }: { label: string; value: string }) {
 type DbField = { key: string; label: string; default: string; password?: boolean; cmdArg?: boolean };
 type DbDef = {
   id: string; name: string; version: string; image: string;
-  accent: string; defaultPort: string; extraPorts?: string[];
+  logoUrl?: string; defaultPort: string; extraPorts?: string[];
   fields: DbField[];
 };
 
+const CDN = "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons";
+
 const DB_CATALOG: DbDef[] = [
-  { id: "postgres", name: "PostgreSQL", version: "16", image: "postgres:16", accent: "text-blue-400 bg-blue-500/10 border-blue-500/20", defaultPort: "5432", fields: [
+  { id: "postgres", name: "PostgreSQL", version: "16", image: "postgres:16", logoUrl: `${CDN}/postgresql/postgresql-original.svg`, defaultPort: "5432", fields: [
     { key: "POSTGRES_DB", label: "Database", default: "mydb" },
     { key: "POSTGRES_USER", label: "Username", default: "postgres" },
     { key: "POSTGRES_PASSWORD", label: "Password", default: "postgres", password: true },
   ]},
-  { id: "mysql", name: "MySQL", version: "8", image: "mysql:8", accent: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20", defaultPort: "3306", fields: [
+  { id: "mysql", name: "MySQL", version: "8", image: "mysql:8", logoUrl: `${CDN}/mysql/mysql-original.svg`, defaultPort: "3306", fields: [
     { key: "MYSQL_DATABASE", label: "Database", default: "mydb" },
     { key: "MYSQL_ROOT_PASSWORD", label: "Root password", default: "rootpass", password: true },
     { key: "MYSQL_USER", label: "User", default: "myuser" },
     { key: "MYSQL_PASSWORD", label: "User password", default: "mypass", password: true },
   ]},
-  { id: "mariadb", name: "MariaDB", version: "11", image: "mariadb:11", accent: "text-orange-400 bg-orange-500/10 border-orange-500/20", defaultPort: "3306", fields: [
+  { id: "mariadb", name: "MariaDB", version: "11", image: "mariadb:11", logoUrl: `${CDN}/mariadb/mariadb-original.svg`, defaultPort: "3306", fields: [
     { key: "MARIADB_DATABASE", label: "Database", default: "mydb" },
     { key: "MARIADB_USER", label: "User", default: "myuser" },
     { key: "MARIADB_PASSWORD", label: "User password", default: "mypass", password: true },
     { key: "MARIADB_ROOT_PASSWORD", label: "Root password", default: "rootpass", password: true },
   ]},
-  { id: "mongodb", name: "MongoDB", version: "7", image: "mongo:7", accent: "text-green-400 bg-green-500/10 border-green-500/20", defaultPort: "27017", fields: [
+  { id: "mongodb", name: "MongoDB", version: "7", image: "mongo:7", logoUrl: `${CDN}/mongodb/mongodb-original.svg`, defaultPort: "27017", fields: [
     { key: "MONGO_INITDB_DATABASE", label: "Database", default: "mydb" },
     { key: "MONGO_INITDB_ROOT_USERNAME", label: "Username", default: "admin" },
     { key: "MONGO_INITDB_ROOT_PASSWORD", label: "Password", default: "secret", password: true },
   ]},
-  { id: "redis", name: "Redis", version: "7", image: "redis:7-alpine", accent: "text-red-400 bg-red-500/10 border-red-500/20", defaultPort: "6379", fields: [
+  { id: "redis", name: "Redis", version: "7", image: "redis:7-alpine", logoUrl: `${CDN}/redis/redis-original.svg`, defaultPort: "6379", fields: [
     { key: "__redis_pass__", label: "Password (optional)", default: "", password: true, cmdArg: true },
   ]},
-  { id: "rabbitmq", name: "RabbitMQ", version: "3-mgmt", image: "rabbitmq:3-management", accent: "text-orange-400 bg-orange-500/10 border-orange-500/20", defaultPort: "5672", extraPorts: ["15672:15672"], fields: [
+  { id: "rabbitmq", name: "RabbitMQ", version: "3-mgmt", image: "rabbitmq:3-management", logoUrl: `${CDN}/rabbitmq/rabbitmq-original.svg`, defaultPort: "5672", extraPorts: ["15672:15672"], fields: [
     { key: "RABBITMQ_DEFAULT_USER", label: "Username", default: "admin" },
     { key: "RABBITMQ_DEFAULT_PASS", label: "Password", default: "admin", password: true },
   ]},
-  { id: "memcached", name: "Memcached", version: "1", image: "memcached:1-alpine", accent: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", defaultPort: "11211", fields: [] },
-  { id: "valkey", name: "Valkey", version: "8", image: "valkey/valkey:8-alpine", accent: "text-purple-400 bg-purple-500/10 border-purple-500/20", defaultPort: "6379", fields: [
+  { id: "memcached", name: "Memcached", version: "1", image: "memcached:1-alpine", defaultPort: "11211", fields: [] },
+  { id: "valkey", name: "Valkey", version: "8", image: "valkey/valkey:8-alpine", logoUrl: `${CDN}/redis/redis-original.svg`, defaultPort: "6379", fields: [
     { key: "__redis_pass__", label: "Password (optional)", default: "", password: true, cmdArg: true },
   ]},
 ];
@@ -550,12 +552,14 @@ export default function DockerPage() {
                   key={db.id}
                   onClick={() => dockerOk && openDbModal(db)}
                   disabled={!dockerOk}
-                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-center hover:scale-105 active:scale-95 ${db.accent} disabled:opacity-40 disabled:cursor-not-allowed`}
+                  className="flex flex-col items-center gap-2 p-3 rounded-xl border border-border bg-card hover:bg-muted/50 hover:border-primary/30 transition-all text-center group disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Database className="w-5 h-5" />
+                  {db.logoUrl
+                    ? <img src={db.logoUrl} alt={db.name} className="w-8 h-8 object-contain" />
+                    : <Database className="w-8 h-8 text-muted-foreground" />}
                   <div>
-                    <p className="text-xs font-medium leading-tight">{db.name}</p>
-                    <p className="text-[10px] opacity-70">{db.version}</p>
+                    <p className="text-xs font-medium text-foreground leading-tight">{db.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{db.version}</p>
                   </div>
                 </button>
               ))}
@@ -671,9 +675,9 @@ export default function DockerPage() {
             <>
               <DialogHeader>
                 <DialogTitle className="text-sm font-medium flex items-center gap-2">
-                  <span className={`p-1.5 rounded-lg border ${selectedDb.accent}`}>
-                    <Database className="w-3.5 h-3.5" />
-                  </span>
+                  {selectedDb.logoUrl
+                    ? <img src={selectedDb.logoUrl} alt={selectedDb.name} className="w-6 h-6 object-contain" />
+                    : <Database className="w-5 h-5 text-muted-foreground" />}
                   Spin up {selectedDb.name}
                   <Badge variant="outline" className="text-[10px] font-mono ml-1">{selectedDb.image}</Badge>
                 </DialogTitle>
