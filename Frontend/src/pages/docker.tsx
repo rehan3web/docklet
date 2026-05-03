@@ -1,10 +1,14 @@
-import React, { useState } from "react";
-import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2, Cpu, MemoryStick } from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { Sun, Moon, Container, Play, Square, RotateCw, Trash2, RefreshCw, AlertTriangle, Loader2, Cpu, MemoryStick, Package, Code2, Database, ChevronDown, ChevronRight, X, CheckCircle2, Terminal, Plus, Eye, EyeOff } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
@@ -13,11 +17,12 @@ import { useLocation } from "wouter";
 import {
   useGetDockerStatus, useGetDockerContainers,
   dockerStart, dockerStop, dockerRestart, dockerRemove, dockerBulk,
+  dockerPullRun, dockerComposeUp,
   getContainerStats,
   type DockerContainer, type ContainerStats,
 } from "@/api/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useCallback } from "react";
+import { useCallback } from "react";
 
 // ── Stats helpers ─────────────────────────────────────────────────────────────
 function fmtBytes(bytes: number) {
@@ -35,7 +40,7 @@ function fmtUptime(ms: number) {
   return `${Math.floor(s / 86400)}d`;
 }
 
-function ContainerStats({ id, running }: { id: string; running: boolean }) {
+function ContainerStatsRow({ id, running }: { id: string; running: boolean }) {
   const [stats, setStats] = useState<ContainerStats | null>(null);
   const [errCount, setErrCount] = useState(0);
 
@@ -94,13 +99,9 @@ function DockerLogo({ className }: { className?: string }) {
 
 // ── Container Card ────────────────────────────────────────────────────────────
 function ContainerCard({
-  container,
-  busy,
-  onAction,
-  onClick,
+  container, busy, onAction, onClick,
 }: {
-  container: DockerContainer;
-  busy: string | null;
+  container: DockerContainer; busy: string | null;
   onAction: (id: string, fn: (id: string) => Promise<void>, label: string, e: React.MouseEvent) => void;
   onClick: () => void;
 }) {
@@ -112,9 +113,7 @@ function ContainerCard({
       className="group relative bg-card border border-border rounded-2xl overflow-hidden cursor-pointer hover:border-primary/40 hover:shadow-md transition-all duration-200"
       onClick={onClick}
     >
-
       <div className="p-5">
-        {/* Top: logo + name + status */}
         <div className="flex items-start gap-3 mb-4">
           <div className={`p-2.5 rounded-xl border shrink-0 ${running ? "bg-[#2496ed]/10 border-[#2496ed]/20" : "bg-muted/60 border-border"}`}>
             <DockerLogo className={`w-6 h-5 ${running ? "text-[#2496ed]" : "text-muted-foreground"}`} />
@@ -133,13 +132,11 @@ function ContainerCard({
           </Badge>
         </div>
 
-        {/* Stats */}
         <div className="flex items-center justify-between mb-4">
-          <ContainerStats id={container.id} running={running} />
+          <ContainerStatsRow id={container.id} running={running} />
           <span className="text-[10px] text-muted-foreground font-mono">{container.shortId}</span>
         </div>
 
-        {/* Meta */}
         <div className="flex items-center gap-2 mb-4">
           <span className="text-[10px] text-muted-foreground">
             Created {format(new Date(container.createdAt), "MMM dd, yyyy")}
@@ -155,47 +152,18 @@ function ContainerCard({
           )}
         </div>
 
-        {/* Action buttons */}
         <div className="flex items-center gap-1.5 pt-3 border-t border-border/60" onClick={e => e.stopPropagation()}>
           {busy === container.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground mr-1 shrink-0" />}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10"
-            disabled={running || busy === container.id}
-            title="Start"
-            onClick={e => onAction(container.id, dockerStart, "Start", e)}
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10" disabled={running || busy === container.id} title="Start" onClick={e => onAction(container.id, dockerStart, "Start", e)}>
             <Play className="w-3.5 h-3.5" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10"
-            disabled={!running || busy === container.id}
-            title="Stop"
-            onClick={e => onAction(container.id, dockerStop, "Stop", e)}
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10" disabled={!running || busy === container.id} title="Stop" onClick={e => onAction(container.id, dockerStop, "Stop", e)}>
             <Square className="w-3.5 h-3.5" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10"
-            disabled={busy === container.id}
-            title="Restart"
-            onClick={e => onAction(container.id, dockerRestart, "Restart", e)}
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10" disabled={busy === container.id} title="Restart" onClick={e => onAction(container.id, dockerRestart, "Restart", e)}>
             <RotateCw className="w-3.5 h-3.5" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-            disabled={busy === container.id}
-            title="Remove"
-            onClick={e => onAction(container.id, dockerRemove, "Remove", e)}
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10" disabled={busy === container.id} title="Remove" onClick={e => onAction(container.id, dockerRemove, "Remove", e)}>
             <Trash2 className="w-3.5 h-3.5" />
           </Button>
           <div className="flex-1" />
@@ -218,6 +186,85 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ── Database catalog ──────────────────────────────────────────────────────────
+type DbField = { key: string; label: string; default: string; password?: boolean; cmdArg?: boolean };
+type DbDef = {
+  id: string; name: string; version: string; image: string;
+  accent: string; defaultPort: string; extraPorts?: string[];
+  fields: DbField[];
+};
+
+const DB_CATALOG: DbDef[] = [
+  { id: "postgres", name: "PostgreSQL", version: "16", image: "postgres:16", accent: "text-blue-400 bg-blue-500/10 border-blue-500/20", defaultPort: "5432", fields: [
+    { key: "POSTGRES_DB", label: "Database", default: "mydb" },
+    { key: "POSTGRES_USER", label: "Username", default: "postgres" },
+    { key: "POSTGRES_PASSWORD", label: "Password", default: "postgres", password: true },
+  ]},
+  { id: "mysql", name: "MySQL", version: "8", image: "mysql:8", accent: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20", defaultPort: "3306", fields: [
+    { key: "MYSQL_DATABASE", label: "Database", default: "mydb" },
+    { key: "MYSQL_ROOT_PASSWORD", label: "Root password", default: "rootpass", password: true },
+    { key: "MYSQL_USER", label: "User", default: "myuser" },
+    { key: "MYSQL_PASSWORD", label: "User password", default: "mypass", password: true },
+  ]},
+  { id: "mariadb", name: "MariaDB", version: "11", image: "mariadb:11", accent: "text-orange-400 bg-orange-500/10 border-orange-500/20", defaultPort: "3306", fields: [
+    { key: "MARIADB_DATABASE", label: "Database", default: "mydb" },
+    { key: "MARIADB_USER", label: "User", default: "myuser" },
+    { key: "MARIADB_PASSWORD", label: "User password", default: "mypass", password: true },
+    { key: "MARIADB_ROOT_PASSWORD", label: "Root password", default: "rootpass", password: true },
+  ]},
+  { id: "mongodb", name: "MongoDB", version: "7", image: "mongo:7", accent: "text-green-400 bg-green-500/10 border-green-500/20", defaultPort: "27017", fields: [
+    { key: "MONGO_INITDB_DATABASE", label: "Database", default: "mydb" },
+    { key: "MONGO_INITDB_ROOT_USERNAME", label: "Username", default: "admin" },
+    { key: "MONGO_INITDB_ROOT_PASSWORD", label: "Password", default: "secret", password: true },
+  ]},
+  { id: "redis", name: "Redis", version: "7", image: "redis:7-alpine", accent: "text-red-400 bg-red-500/10 border-red-500/20", defaultPort: "6379", fields: [
+    { key: "__redis_pass__", label: "Password (optional)", default: "", password: true, cmdArg: true },
+  ]},
+  { id: "rabbitmq", name: "RabbitMQ", version: "3-mgmt", image: "rabbitmq:3-management", accent: "text-orange-400 bg-orange-500/10 border-orange-500/20", defaultPort: "5672", extraPorts: ["15672:15672"], fields: [
+    { key: "RABBITMQ_DEFAULT_USER", label: "Username", default: "admin" },
+    { key: "RABBITMQ_DEFAULT_PASS", label: "Password", default: "admin", password: true },
+  ]},
+  { id: "memcached", name: "Memcached", version: "1", image: "memcached:1-alpine", accent: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", defaultPort: "11211", fields: [] },
+  { id: "valkey", name: "Valkey", version: "8", image: "valkey/valkey:8-alpine", accent: "text-purple-400 bg-purple-500/10 border-purple-500/20", defaultPort: "6379", fields: [
+    { key: "__redis_pass__", label: "Password (optional)", default: "", password: true, cmdArg: true },
+  ]},
+];
+
+// ── Log stream modal ──────────────────────────────────────────────────────────
+function LogModal({ open, onClose, logs, done, ok, title }: {
+  open: boolean; onClose: () => void;
+  logs: string[]; done: boolean; ok: boolean; title: string;
+}) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o && done) onClose(); }}>
+      <DialogContent className="max-w-2xl w-full p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-4 py-3 border-b border-border flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-muted-foreground" />
+            <DialogTitle className="text-sm font-medium">{title}</DialogTitle>
+          </div>
+          <div className="flex items-center gap-2">
+            {!done && <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin" />Running…</span>}
+            {done && ok && <span className="flex items-center gap-1.5 text-xs text-emerald-500"><CheckCircle2 className="w-3.5 h-3.5" />Done</span>}
+            {done && !ok && <span className="flex items-center gap-1.5 text-xs text-destructive"><X className="w-3.5 h-3.5" />Failed</span>}
+            <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground" disabled={!done} onClick={onClose}>
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </DialogHeader>
+        <div className="bg-black/90 font-mono text-[11px] text-green-400 p-4 h-80 overflow-y-auto leading-relaxed">
+          {logs.map((l, i) => <span key={i} className="whitespace-pre-wrap break-all">{l}</span>)}
+          {!done && <span className="animate-pulse">▌</span>}
+          <div ref={bottomRef} />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function DockerPage() {
   const { theme, toggle } = useTheme();
@@ -228,10 +275,33 @@ export default function DockerPage() {
   const [bulkAction, setBulkAction] = useState<"start" | "stop" | "restart" | "remove" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const refresh = () => {
+  // Docker Hub installer
+  const [hubImage, setHubImage] = useState("");
+  const [hubName, setHubName] = useState("");
+  const [hubPort, setHubPort] = useState("");
+
+  // Compose installer
+  const [showCompose, setShowCompose] = useState(false);
+  const [composeYaml, setComposeYaml] = useState("");
+
+  // DB spinner
+  const [selectedDb, setSelectedDb] = useState<DbDef | null>(null);
+  const [dbValues, setDbValues] = useState<Record<string, string>>({});
+  const [dbContainerName, setDbContainerName] = useState("");
+  const [dbPort, setDbPort] = useState("");
+  const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
+
+  // Shared log modal
+  const [logTitle, setLogTitle] = useState("");
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [logDone, setLogDone] = useState(false);
+  const [logOk, setLogOk] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+
+  const refresh = useCallback(() => {
     qc.invalidateQueries({ queryKey: ["docker-containers"] });
     qc.invalidateQueries({ queryKey: ["docker-status"] });
-  };
+  }, [qc]);
 
   async function action(id: string, fn: (id: string) => Promise<void>, label: string, e: React.MouseEvent) {
     e.stopPropagation();
@@ -251,6 +321,81 @@ export default function DockerPage() {
       refresh();
     } catch (err: any) { toast.error(err.message || "Bulk action failed"); }
     finally { setBulkAction(null); }
+  }
+
+  function openLog(title: string) {
+    setLogTitle(title);
+    setLogLines([]);
+    setLogDone(false);
+    setLogOk(false);
+    setShowLog(true);
+  }
+
+  async function deployHub() {
+    if (!hubImage.trim()) { toast.error("Enter an image name"); return; }
+    const ports = hubPort.trim() ? [hubPort.trim()] : [];
+    openLog(`Deploying ${hubImage}`);
+    const result = await dockerPullRun(hubImage.trim(), hubName.trim(), ports, [], [], line => {
+      setLogLines(p => [...p, line]);
+    });
+    setLogOk(result.ok);
+    setLogDone(true);
+    if (result.ok) { toast.success("Container deployed!"); refresh(); setHubImage(""); setHubName(""); setHubPort(""); }
+    else toast.error(result.error || "Deploy failed");
+  }
+
+  async function deployCompose() {
+    if (!composeYaml.trim()) { toast.error("Paste a compose file first"); return; }
+    setShowCompose(false);
+    openLog("Compose Deploy");
+    const result = await dockerComposeUp(composeYaml.trim(), line => {
+      setLogLines(p => [...p, line]);
+    });
+    setLogOk(result.ok);
+    setLogDone(true);
+    if (result.ok) { toast.success("Compose deployed!"); refresh(); setComposeYaml(""); }
+    else toast.error(result.error || "Deploy failed");
+  }
+
+  function openDbModal(db: DbDef) {
+    const defaults: Record<string, string> = {};
+    db.fields.forEach(f => { defaults[f.key] = f.default; });
+    setDbValues(defaults);
+    setDbContainerName(db.id);
+    setDbPort(db.defaultPort);
+    setShowPasswords({});
+    setSelectedDb(db);
+  }
+
+  async function deployDb() {
+    if (!selectedDb) return;
+    const env: string[] = [];
+    let cmd: string[] = [];
+    for (const f of selectedDb.fields) {
+      const val = dbValues[f.key] || "";
+      if (f.cmdArg) {
+        if (val) {
+          if (selectedDb.id === "redis" || selectedDb.id === "valkey") {
+            cmd = ["redis-server", "--requirepass", val];
+          }
+        }
+      } else if (val) {
+        env.push(`${f.key}=${val}`);
+      }
+    }
+    const ports: string[] = [`${dbPort}:${selectedDb.defaultPort}`];
+    if (selectedDb.extraPorts) ports.push(...selectedDb.extraPorts);
+
+    const dbCopy = selectedDb;
+    setSelectedDb(null);
+    openLog(`Spinning up ${dbCopy.name}`);
+    const result = await dockerPullRun(dbCopy.image, dbContainerName, ports, env, cmd, line => {
+      setLogLines(p => [...p, line]);
+    });
+    setLogOk(result.ok);
+    setLogDone(true);
+    if (result.ok) { toast.success(`${dbCopy.name} started!`); refresh(); }
+    else toast.error(result.error || "Deploy failed");
   }
 
   const containers = containersData?.containers || [];
@@ -316,7 +461,108 @@ export default function DockerPage() {
             </div>
           )}
 
-          {/* Bulk Actions */}
+          {/* ── Quick Deploy ─────────────────────────────────────────────── */}
+          <div>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Quick Deploy</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              {/* Docker Hub installer */}
+              <Card className="bg-background border-border shadow-none rounded-xl">
+                <CardHeader className="p-4 pb-3 border-b border-border/50">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-[#2496ed]/10 border border-[#2496ed]/20">
+                      <Package className="w-3.5 h-3.5 text-[#2496ed]" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-sm font-medium">Docker Hub</CardTitle>
+                      <CardDescription className="text-xs text-muted-foreground">Pull any image and run it instantly</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-4 space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Image</Label>
+                    <Input
+                      placeholder="nginx:latest, redis:7, node:20-alpine…"
+                      value={hubImage}
+                      onChange={e => setHubImage(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && deployHub()}
+                      className="h-8 text-xs font-mono"
+                      disabled={!dockerOk}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Container name (optional)</Label>
+                      <Input placeholder="my-app" value={hubName} onChange={e => setHubName(e.target.value)} className="h-8 text-xs" disabled={!dockerOk} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Port (optional)</Label>
+                      <Input placeholder="80:80" value={hubPort} onChange={e => setHubPort(e.target.value)} className="h-8 text-xs font-mono" disabled={!dockerOk} />
+                    </div>
+                  </div>
+                  <Button
+                    className="w-full h-8 text-xs bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] border border-black/10 dark:border-white/10 shadow-none"
+                    disabled={!dockerOk || !hubImage.trim()}
+                    onClick={deployHub}
+                  >
+                    <Play className="w-3 h-3 mr-1.5" />Deploy
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Compose installer */}
+              <Card className="bg-background border-border shadow-none rounded-xl">
+                <CardHeader className="p-4 pb-3 border-b border-border/50">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/20">
+                      <Code2 className="w-3.5 h-3.5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-sm font-medium">Compose Deploy</CardTitle>
+                      <CardDescription className="text-xs text-muted-foreground">Paste a docker-compose.yml and deploy</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-4 flex flex-col gap-3 justify-between h-[calc(100%-72px)]">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Paste your <code className="font-mono text-foreground bg-muted/50 px-1 rounded">docker-compose.yml</code> content and watch it deploy with real-time logs.
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="w-full h-8 text-xs"
+                    disabled={!dockerOk}
+                    onClick={() => setShowCompose(true)}
+                  >
+                    <Code2 className="w-3 h-3 mr-1.5" />Open Compose Editor
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+
+          {/* ── Spin a Database ──────────────────────────────────────────── */}
+          <div>
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Spin a Database</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+              {DB_CATALOG.map(db => (
+                <button
+                  key={db.id}
+                  onClick={() => dockerOk && openDbModal(db)}
+                  disabled={!dockerOk}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-center hover:scale-105 active:scale-95 ${db.accent} disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  <Database className="w-5 h-5" />
+                  <div>
+                    <p className="text-xs font-medium leading-tight">{db.name}</p>
+                    <p className="text-[10px] opacity-70">{db.version}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Bulk Actions ─────────────────────────────────────────────── */}
           <Card className="bg-background border-border shadow-none rounded-xl">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-sm font-medium tracking-tight">Bulk Actions</CardTitle>
@@ -330,7 +576,7 @@ export default function DockerPage() {
             </CardContent>
           </Card>
 
-          {/* Container Cards */}
+          {/* ── Container Cards ───────────────────────────────────────────── */}
           <div>
             <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-4">
               Containers {!isLoading && `(${containers.length})`}
@@ -373,7 +619,7 @@ export default function DockerPage() {
         </main>
       </div>
 
-      {/* Bulk confirm */}
+      {/* ── Bulk confirm dialog ───────────────────────────────────────────── */}
       <AlertDialog open={!!bulkAction} onOpenChange={o => { if (!o) setBulkAction(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -386,6 +632,115 @@ export default function DockerPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Compose editor modal ──────────────────────────────────────────── */}
+      <Dialog open={showCompose} onOpenChange={setShowCompose}>
+        <DialogContent className="max-w-2xl w-full">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-medium flex items-center gap-2">
+              <Code2 className="w-4 h-4" />Compose Deploy
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Paste your <code className="font-mono bg-muted/50 px-1 rounded">docker-compose.yml</code> content below.</p>
+            <Textarea
+              value={composeYaml}
+              onChange={e => setComposeYaml(e.target.value)}
+              placeholder={"version: '3.8'\nservices:\n  app:\n    image: nginx:latest\n    ports:\n      - '80:80'"}
+              className="font-mono text-xs h-64 resize-none"
+            />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" className="text-xs" onClick={() => setShowCompose(false)}>Cancel</Button>
+              <Button
+                size="sm"
+                className="text-xs bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] border border-black/10 dark:border-white/10 shadow-none"
+                disabled={!composeYaml.trim()}
+                onClick={deployCompose}
+              >
+                <Play className="w-3 h-3 mr-1.5" />Deploy
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── DB config modal ───────────────────────────────────────────────── */}
+      <Dialog open={!!selectedDb} onOpenChange={o => { if (!o) setSelectedDb(null); }}>
+        <DialogContent className="max-w-md w-full">
+          {selectedDb && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-sm font-medium flex items-center gap-2">
+                  <span className={`p-1.5 rounded-lg border ${selectedDb.accent}`}>
+                    <Database className="w-3.5 h-3.5" />
+                  </span>
+                  Spin up {selectedDb.name}
+                  <Badge variant="outline" className="text-[10px] font-mono ml-1">{selectedDb.image}</Badge>
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Container name</Label>
+                    <Input value={dbContainerName} onChange={e => setDbContainerName(e.target.value)} className="h-8 text-xs" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Host port</Label>
+                    <Input value={dbPort} onChange={e => setDbPort(e.target.value)} className="h-8 text-xs font-mono" />
+                  </div>
+                </div>
+                {selectedDb.fields.map(f => (
+                  <div key={f.key} className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">{f.label}</Label>
+                    <div className="relative">
+                      <Input
+                        type={f.password && !showPasswords[f.key] ? "password" : "text"}
+                        value={dbValues[f.key] ?? f.default}
+                        onChange={e => setDbValues(p => ({ ...p, [f.key]: e.target.value }))}
+                        className="h-8 text-xs pr-8"
+                      />
+                      {f.password && (
+                        <button
+                          type="button"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          onClick={() => setShowPasswords(p => ({ ...p, [f.key]: !p[f.key] }))}
+                        >
+                          {showPasswords[f.key] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {selectedDb.extraPorts && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Additional ports: {selectedDb.extraPorts.join(", ")} (auto-mapped)
+                  </p>
+                )}
+                <div className="flex gap-2 justify-end pt-1">
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => setSelectedDb(null)}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    className="text-xs bg-[#72e3ad] text-black hover:bg-[#5fd49a] dark:bg-[#006239] dark:text-white dark:hover:bg-[#007a47] border border-black/10 dark:border-white/10 shadow-none"
+                    onClick={deployDb}
+                  >
+                    <Play className="w-3 h-3 mr-1.5" />Deploy {selectedDb.name}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Log stream modal ──────────────────────────────────────────────── */}
+      <LogModal
+        open={showLog}
+        onClose={() => setShowLog(false)}
+        logs={logLines}
+        done={logDone}
+        ok={logOk}
+        title={logTitle}
+      />
     </div>
   );
 }

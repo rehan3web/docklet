@@ -1,6 +1,7 @@
 import express from 'express';
 import Docker from 'dockerode';
 import fs from 'fs';
+import { spawn, execSync } from 'child_process';
 import { Socket } from 'socket.io';
 import { authenticateToken } from '../middleware/auth';
 
@@ -278,6 +279,111 @@ router.post('/bulk/:action', authenticateToken, async (req, res) => {
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }
+});
+
+// ── Pull + Run (SSE streaming) ────────────────────────────────────────────────
+router.post('/pull-run', authenticateToken, async (req, res) => {
+    const { image, name, ports, env, cmd } = req.body;
+    if (!image) return res.status(400).json({ message: 'image required' });
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const send = (data: object) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+
+    try {
+        send({ log: `Pulling ${image}...\n` });
+        const d = getDocker();
+        await new Promise<void>((resolve, reject) => {
+            d.pull(image, (err: any, stream: any) => {
+                if (err) return reject(err);
+                d.modem.followProgress(stream, (err2: any) => {
+                    if (err2) return reject(err2);
+                    resolve();
+                }, (event: any) => {
+                    const msg = (event.status || '') + (event.progress ? ` ${event.progress}` : '');
+                    if (msg.trim()) send({ log: msg + '\n' });
+                });
+            });
+        });
+        send({ log: `\nImage ready. Creating container...\n` });
+
+        const portBindings: Record<string, any[]> = {};
+        const exposedPorts: Record<string, {}> = {};
+        if (Array.isArray(ports)) {
+            for (const p of ports) {
+                const parts = String(p).split(':');
+                const hostPort = parts[0];
+                const containerPort = parts[1] || parts[0];
+                portBindings[`${containerPort}/tcp`] = [{ HostPort: hostPort }];
+                exposedPorts[`${containerPort}/tcp`] = {};
+            }
+        }
+
+        const createOpts: any = {
+            Image: image,
+            Env: Array.isArray(env) ? env : [],
+            ExposedPorts: exposedPorts,
+            HostConfig: { PortBindings: portBindings, RestartPolicy: { Name: 'unless-stopped' } },
+        };
+        if (name) createOpts.name = name;
+        if (Array.isArray(cmd) && cmd.length) createOpts.Cmd = cmd;
+
+        const container = await d.createContainer(createOpts);
+        await container.start();
+        const info = await container.inspect();
+        const cname = (info.Name || '').replace('/', '');
+        send({ log: `\nContainer started: ${cname} (${info.Id.slice(0, 12)})\n` });
+        send({ done: true, ok: true, containerId: info.Id.slice(0, 12) });
+    } catch (err: any) {
+        send({ log: `\nError: ${err.message}\n` });
+        send({ done: true, ok: false, error: err.message });
+    }
+    res.end();
+});
+
+// ── Compose Up (SSE streaming) ────────────────────────────────────────────────
+router.post('/compose-up', authenticateToken, (req, res) => {
+    const { yaml } = req.body;
+    if (!yaml) return res.status(400).json({ message: 'yaml required' });
+    const avail = dockerAvailable();
+    if (!avail.ok) return res.status(503).json({ message: avail.reason });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const send = (data: object) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+
+    const tmpDir = `/tmp/docklet-compose-${Date.now()}`;
+    try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+    fs.writeFileSync(`${tmpDir}/docker-compose.yml`, yaml);
+
+    let cmd: string, args: string[];
+    try {
+        execSync('docker compose version', { stdio: 'pipe', timeout: 3000 });
+        cmd = 'docker';
+        args = ['compose', '-f', `${tmpDir}/docker-compose.yml`, 'up', '-d', '--force-recreate'];
+    } catch {
+        cmd = 'docker-compose';
+        args = ['-f', `${tmpDir}/docker-compose.yml`, 'up', '-d', '--force-recreate'];
+    }
+
+    send({ log: `$ ${cmd} ${args.join(' ')}\n\n` });
+    const proc = spawn(cmd, args);
+    proc.stdout.on('data', (d: Buffer) => send({ log: d.toString() }));
+    proc.stderr.on('data', (d: Buffer) => send({ log: d.toString() }));
+    proc.on('close', (code: number) => {
+        try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
+        send({ done: true, ok: code === 0, code });
+        res.end();
+    });
+    req.on('close', () => { try { proc.kill(); } catch {} });
 });
 
 export default router;

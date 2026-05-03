@@ -521,6 +521,57 @@ export async function dockerBulk(action: "start" | "stop" | "restart" | "remove"
   return apiFetch(`/docker/bulk/${action}`, { method: "POST" });
 }
 
+export async function dockerStreamDeploy(
+  endpoint: string,
+  body: object,
+  onLog: (line: string) => void
+): Promise<{ ok: boolean; error?: string }> {
+  const token = getToken();
+  const response = await fetch(`${BASE}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ message: "Unknown error" }));
+    return { ok: false, error: err.message };
+  }
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop()!;
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        try {
+          const parsed = JSON.parse(line.slice(6));
+          if (parsed.log !== undefined) onLog(parsed.log);
+          if (parsed.done) return { ok: parsed.ok, error: parsed.error };
+        } catch {}
+      }
+    }
+  }
+  return { ok: false, error: "Stream ended unexpectedly" };
+}
+
+export async function dockerPullRun(
+  image: string, name: string, ports: string[], env: string[], cmd: string[],
+  onLog: (line: string) => void
+): Promise<{ ok: boolean; error?: string }> {
+  return dockerStreamDeploy("/docker/pull-run", { image, name, ports, env, cmd }, onLog);
+}
+
+export async function dockerComposeUp(
+  yaml: string,
+  onLog: (line: string) => void
+): Promise<{ ok: boolean; error?: string }> {
+  return dockerStreamDeploy("/docker/compose-up", { yaml }, onLog);
+}
+
 // ── GitHub Auto Deploy ────────────────────────────────────────────────────────
 
 export type DeploySummary = {
