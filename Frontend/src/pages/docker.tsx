@@ -398,23 +398,23 @@ export default function DockerPage() {
     const adminerPort = dbAdminerPort;
     const adminerName = `${dbContainerName}-adminer`;
     setSelectedDb(null);
-    openLog(`Spinning up ${dbCopy.name}${includeAdminer ? " + Adminer" : ""}`);
+    openLog(`Spinning up ${dbCopy.name}${includeAdminer ? " + phpMyAdmin" : ""}`);
     const result = await dockerPullRun(dbCopy.image, dbContainerName, ports, env, cmd, line => {
       setLogLines(p => [...p, line]);
     });
     if (result.ok && includeAdminer) {
-      setLogLines(p => [...p, `\n— Deploying Adminer on port ${adminerPort}...\n`]);
+      setLogLines(p => [...p, `\n— Deploying phpMyAdmin on port ${adminerPort}...\n`]);
       const adminerResult = await dockerPullRun(
-        "adminer:latest", adminerName,
-        [`${hostIp}:${adminerPort}:8080`],
-        [`ADMINER_DEFAULT_SERVER=${dbContainerName}`],
+        "phpmyadmin/phpmyadmin", adminerName,
+        [`${hostIp}:${adminerPort}:80`],
+        [`PMA_HOST=${dbContainerName}`, `PMA_PORT=3306`],
         [],
         line => setLogLines(p => [...p, line])
       );
       setLogOk(adminerResult.ok);
       setLogDone(true);
-      if (adminerResult.ok) { toast.success(`${dbCopy.name} + Adminer started!`); refresh(); }
-      else toast.error(adminerResult.error || "Adminer deploy failed");
+      if (adminerResult.ok) { toast.success(`${dbCopy.name} + phpMyAdmin started!`); refresh(); }
+      else toast.error(adminerResult.error || "phpMyAdmin deploy failed");
     } else {
       setLogOk(result.ok);
       setLogDone(true);
@@ -762,8 +762,8 @@ export default function DockerPage() {
                   <div className="rounded-lg border border-border overflow-hidden">
                     <div className="flex items-center justify-between px-3 py-2">
                       <div>
-                        <p className="text-xs font-medium">Include Adminer web panel</p>
-                        <p className="text-[10px] text-muted-foreground">Lightweight SQL admin UI — works with all SQL databases</p>
+                        <p className="text-xs font-medium">Include phpMyAdmin</p>
+                        <p className="text-[10px] text-muted-foreground">Full-featured MySQL web admin panel</p>
                       </div>
                       <button
                         type="button"
@@ -775,7 +775,7 @@ export default function DockerPage() {
                     </div>
                     {dbIncludeAdminer && (
                       <div className="px-3 pb-3 border-t border-border/50 pt-2 space-y-1">
-                        <label className="text-[10px] text-muted-foreground">Adminer host port</label>
+                        <label className="text-[10px] text-muted-foreground">phpMyAdmin host port</label>
                         <Input value={dbAdminerPort} onChange={e => setDbAdminerPort(e.target.value)} className="h-8 text-xs font-mono" />
                       </div>
                     )}
