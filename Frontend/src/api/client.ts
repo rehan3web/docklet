@@ -560,9 +560,9 @@ export async function dockerStreamDeploy(
 
 export async function dockerPullRun(
   image: string, name: string, ports: string[], env: string[], cmd: string[],
-  onLog: (line: string) => void
+  onLog: (line: string) => void, network?: string
 ): Promise<{ ok: boolean; error?: string }> {
-  return dockerStreamDeploy("/docker/pull-run", { image, name, ports, env, cmd }, onLog);
+  return dockerStreamDeploy("/docker/pull-run", { image, name, ports, env, cmd, network }, onLog);
 }
 
 export async function dockerComposeUp(

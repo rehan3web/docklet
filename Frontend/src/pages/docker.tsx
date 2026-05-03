@@ -398,10 +398,11 @@ export default function DockerPage() {
     const adminerPort = dbAdminerPort;
     const adminerName = `${dbContainerName}-adminer`;
     setSelectedDb(null);
+    const dbNetwork = includeAdminer ? `docklet-db-${dbContainerName}` : undefined;
     openLog(`Spinning up ${dbCopy.name}${includeAdminer ? " + phpMyAdmin" : ""}`);
     const result = await dockerPullRun(dbCopy.image, dbContainerName, ports, env, cmd, line => {
       setLogLines(p => [...p, line]);
-    });
+    }, dbNetwork);
     if (result.ok && includeAdminer) {
       setLogLines(p => [...p, `\n— Deploying phpMyAdmin on port ${adminerPort}...\n`]);
       const adminerResult = await dockerPullRun(
@@ -409,7 +410,8 @@ export default function DockerPage() {
         [`${hostIp}:${adminerPort}:80`],
         [`PMA_HOST=${dbContainerName}`, `PMA_PORT=3306`],
         [],
-        line => setLogLines(p => [...p, line])
+        line => setLogLines(p => [...p, line]),
+        dbNetwork
       );
       setLogOk(adminerResult.ok);
       setLogDone(true);

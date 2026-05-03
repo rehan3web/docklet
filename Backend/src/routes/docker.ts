@@ -284,7 +284,7 @@ router.post('/bulk/:action', authenticateToken, async (req, res) => {
 
 // ── Pull + Run (SSE streaming) ────────────────────────────────────────────────
 router.post('/pull-run', authenticateToken, async (req, res) => {
-    const { image, name, ports, env, cmd } = req.body;
+    const { image, name, ports, env, cmd, network } = req.body;
     if (!image) return res.status(400).json({ message: 'image required' });
     const avail = dockerAvailable();
     if (!avail.ok) return res.status(503).json({ message: avail.reason });
@@ -346,6 +346,26 @@ router.post('/pull-run', authenticateToken, async (req, res) => {
         const info = await container.inspect();
         const cname = (info.Name || '').replace('/', '');
         send({ log: `\nContainer started: ${cname} (${info.Id.slice(0, 12)})\n` });
+
+        if (network) {
+            send({ log: `Connecting to network "${network}"...\n` });
+            try {
+                let net: any;
+                const nets = await d.listNetworks({ filters: { name: [network] } });
+                const exact = nets.find((n: any) => n.Name === network);
+                if (exact) {
+                    net = d.getNetwork(exact.Id);
+                } else {
+                    net = await d.createNetwork({ Name: network, Driver: 'bridge' });
+                    send({ log: `Network "${network}" created.\n` });
+                }
+                await net.connect({ Container: info.Id });
+                send({ log: `Connected to network "${network}".\n` });
+            } catch (netErr: any) {
+                send({ log: `Warning: network connect failed — ${netErr.message}\n` });
+            }
+        }
+
         send({ done: true, ok: true, containerId: info.Id.slice(0, 12) });
     } catch (err: any) {
         send({ log: `\nError: ${err.message}\n` });
