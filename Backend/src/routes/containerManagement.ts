@@ -343,17 +343,32 @@ async function runBackup(backupId: number): Promise<number> {
 
         await appendLog(`[${new Date().toUTCString()}] Detected DB type: ${dbType} (${found.Id.slice(0, 12)})`);
 
+        // Inspect container to extract env-var credentials
+        const inspected = await docker.getContainer(found.Id).inspect();
+        const envArr: string[] = (inspected.Config?.Env || []);
+        const getEnv = (key: string) => {
+            const entry = envArr.find(e => e.startsWith(key + '='));
+            return entry ? entry.slice(key.length + 1) : '';
+        };
+
         // Build dump command
         let dumpArgs: string[];
         let ext: string;
         if (dbType === 'postgres') {
-            dumpArgs = ['exec', found.Id, 'pg_dump', '-U', 'postgres', '--format=custom', '--no-password'];
+            const pgUser = getEnv('POSTGRES_USER') || 'postgres';
+            dumpArgs = ['exec', found.Id, 'pg_dump', '-U', pgUser, '--format=custom', '--no-password'];
             ext = 'pgdump';
         } else if (dbType === 'mysql') {
-            dumpArgs = ['exec', found.Id, 'mysqldump', '-u', 'root', '--all-databases', '--single-transaction', '--quick'];
+            const rootPass = getEnv('MYSQL_ROOT_PASSWORD');
+            dumpArgs = rootPass
+                ? ['exec', found.Id, 'mysqldump', `-uroot`, `-p${rootPass}`, '--all-databases', '--single-transaction', '--quick']
+                : ['exec', found.Id, 'mysqldump', '-u', 'root', '--all-databases', '--single-transaction', '--quick'];
             ext = 'sql';
         } else if (dbType === 'mariadb') {
-            dumpArgs = ['exec', found.Id, 'mariadb-dump', '-u', 'root', '--all-databases', '--single-transaction', '--quick'];
+            const rootPass = getEnv('MARIADB_ROOT_PASSWORD') || getEnv('MYSQL_ROOT_PASSWORD');
+            dumpArgs = rootPass
+                ? ['exec', found.Id, 'mariadb-dump', `-uroot`, `-p${rootPass}`, '--all-databases', '--single-transaction', '--quick']
+                : ['exec', found.Id, 'mariadb-dump', '-u', 'root', '--all-databases', '--single-transaction', '--quick'];
             ext = 'sql';
         } else {
             dumpArgs = ['exec', found.Id, 'mongodump', '--archive'];

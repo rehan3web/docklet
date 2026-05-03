@@ -411,6 +411,10 @@ router.post('/rebind', authenticateToken, async (req, res) => {
             exposedPorts[port] = {};
         }
 
+        // Save non-default networks so we can rejoin them after recreate
+        const extraNetworks = Object.keys((info.NetworkSettings as any).Networks || {})
+            .filter(n => n !== 'bridge' && n !== 'host' && n !== 'none');
+
         send({ log: `Stopping ${name}...\n` });
         try { await c.stop({ t: 5 }); } catch {}
         send({ log: `Removing ${name}...\n` });
@@ -429,6 +433,22 @@ router.post('/rebind', authenticateToken, async (req, res) => {
         const newC = await d.createContainer(createOpts);
         await newC.start();
         const newInfo = await newC.inspect();
+
+        // Reconnect to all previous user-defined networks
+        for (const netName of extraNetworks) {
+            try {
+                const nets = await d.listNetworks({ filters: { name: [netName] } });
+                const exact = nets.find((n: any) => n.Name === netName);
+                if (exact) {
+                    const net = d.getNetwork(exact.Id);
+                    await net.connect({ Container: newInfo.Id });
+                    send({ log: `Reconnected to network "${netName}".\n` });
+                }
+            } catch (netErr: any) {
+                send({ log: `Warning: could not rejoin network "${netName}" — ${netErr.message}\n` });
+            }
+        }
+
         send({ log: `\nDone — ${name} (${newInfo.Id.slice(0, 12)}) now ${makePublic ? 'public' : 'private'}.\n` });
         send({ done: true, ok: true, containerId: newInfo.Id.slice(0, 12) });
     } catch (err: any) {
