@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { DesktopSidebar, MobileSidebarTrigger } from "@/components/AppSidebar";
 import { useTheme } from "@/hooks/use-theme";
@@ -277,10 +276,10 @@ export default function ProxyPage() {
                   <CardDescription className="text-xs text-muted-foreground">{domains.length} configured</CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
-                  <ScrollArea className="h-[520px]">
+                  <div>
                     {domains.length === 0 ? (
-                      <div className="p-8 text-center">
-                        <Globe className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+                      <div className="px-4 py-6 text-center">
+                        <Globe className="w-7 h-7 text-muted-foreground/40 mx-auto mb-2" />
                         <p className="text-xs text-muted-foreground">No domains yet. Click "Add Domain" to get started.</p>
                       </div>
                     ) : (
@@ -303,7 +302,7 @@ export default function ProxyPage() {
                         ))}
                       </div>
                     )}
-                  </ScrollArea>
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -312,9 +311,9 @@ export default function ProxyPage() {
             <div className="lg:col-span-3 space-y-4">
               {!selected ? (
                 <Card className="bg-background border-border shadow-none rounded-xl">
-                  <CardContent className="p-12 text-center">
-                    <Globe className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-                    <p className="text-sm text-muted-foreground">Select a domain to see DNS instructions and SSL setup.</p>
+                  <CardContent className="px-4 py-6 text-center">
+                    <Globe className="w-7 h-7 text-muted-foreground/30 mx-auto mb-2" />
+                    <p className="text-xs text-muted-foreground">Select a domain to see DNS instructions and SSL setup.</p>
                   </CardContent>
                 </Card>
               ) : (
