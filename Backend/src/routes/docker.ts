@@ -317,9 +317,16 @@ router.post('/pull-run', authenticateToken, async (req, res) => {
         if (Array.isArray(ports)) {
             for (const p of ports) {
                 const parts = String(p).split(':');
-                const hostPort = parts[0];
-                const containerPort = parts[1] || parts[0];
-                portBindings[`${containerPort}/tcp`] = [{ HostPort: hostPort }];
+                let hostIp = '', hostPort = '', containerPort = '';
+                if (parts.length === 3) {
+                    [hostIp, hostPort, containerPort] = parts;
+                } else {
+                    hostPort = parts[0];
+                    containerPort = parts[1] || parts[0];
+                }
+                const binding: any = { HostPort: hostPort };
+                if (hostIp) binding.HostIp = hostIp;
+                portBindings[`${containerPort}/tcp`] = [binding];
                 exposedPorts[`${containerPort}/tcp`] = {};
             }
         }

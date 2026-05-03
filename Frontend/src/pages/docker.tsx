@@ -288,6 +288,7 @@ export default function DockerPage() {
   const [dbValues, setDbValues] = useState<Record<string, string>>({});
   const [dbContainerName, setDbContainerName] = useState("");
   const [dbPort, setDbPort] = useState("");
+  const [dbPublic, setDbPublic] = useState(false);
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
 
   // Shared log modal
@@ -362,6 +363,7 @@ export default function DockerPage() {
     setDbValues(defaults);
     setDbContainerName(db.id);
     setDbPort(db.defaultPort);
+    setDbPublic(false);
     setShowPasswords({});
     setSelectedDb(db);
   }
@@ -382,8 +384,9 @@ export default function DockerPage() {
         env.push(`${f.key}=${val}`);
       }
     }
-    const ports: string[] = [`${dbPort}:${selectedDb.defaultPort}`];
-    if (selectedDb.extraPorts) ports.push(...selectedDb.extraPorts);
+    const hostIp = dbPublic ? "0.0.0.0" : "127.0.0.1";
+    const ports: string[] = [`${hostIp}:${dbPort}:${selectedDb.defaultPort}`];
+    if (selectedDb.extraPorts) ports.push(...selectedDb.extraPorts.map(p => `${hostIp}:${p}`));
 
     const dbCopy = selectedDb;
     setSelectedDb(null);
@@ -689,6 +692,21 @@ export default function DockerPage() {
                     <Label className="text-xs text-muted-foreground">Host port</Label>
                     <Input value={dbPort} onChange={e => setDbPort(e.target.value)} className="h-8 text-xs font-mono" />
                   </div>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+                  <div>
+                    <p className="text-xs font-medium">{dbPublic ? "Public" : "Private"}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {dbPublic ? "Bound to 0.0.0.0 — accessible from outside the host" : "Bound to 127.0.0.1 — localhost only"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDbPublic(p => !p)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${dbPublic ? "bg-primary" : "bg-muted"}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${dbPublic ? "translate-x-4" : "translate-x-0"}`} />
+                  </button>
                 </div>
                 {selectedDb.fields.map(f => (
                   <div key={f.key} className="space-y-1">
