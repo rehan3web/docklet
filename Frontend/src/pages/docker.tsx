@@ -227,9 +227,6 @@ const DB_CATALOG: DbDef[] = [
     { key: "RABBITMQ_DEFAULT_PASS", label: "Password", default: "admin", password: true },
   ]},
   { id: "memcached", name: "Memcached", version: "1", image: "memcached:1-alpine", defaultPort: "11211", fields: [] },
-  { id: "valkey", name: "Valkey", version: "8", image: "valkey/valkey:8-alpine", logoUrl: `${CDN}/redis/redis-original.svg`, defaultPort: "6379", fields: [
-    { key: "__redis_pass__", label: "Password (optional)", default: "", password: true, cmdArg: true },
-  ]},
 ];
 
 // ── Log stream modal ──────────────────────────────────────────────────────────
